@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // InteractionAuthenticator は Interaction API の呼び出し元を認証する（ADR-0003 §4）。

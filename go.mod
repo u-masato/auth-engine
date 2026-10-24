@@ -1,4 +1,4 @@
-module github.com/muno/auth-engine
+module github.com/u-masato/auth-engine
 
 go 1.26
 

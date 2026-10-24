@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/muno/auth-engine/client"
+	"github.com/u-masato/auth-engine/client"
 )
 
 // IDTokenInput は ID Token の発行に必要な、トークンエンドポイントが持つ情報。

@@ -14,8 +14,8 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/storage/storagetest"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/storage/storagetest"
 )
 
 // 接続先の決め方:

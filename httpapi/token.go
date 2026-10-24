@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // handleToken は /token（RFC 6749 §3.2、§4.1.3、§5）。

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 func (s *Store) CreateTransaction(ctx context.Context, txn *authorization.Transaction) error {

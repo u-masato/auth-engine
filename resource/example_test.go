@@ -3,7 +3,7 @@ package resource_test
 import (
 	"fmt"
 
-	"github.com/muno/auth-engine/resource"
+	"github.com/u-masato/auth-engine/resource"
 )
 
 // ExampleNormalize は resource indicator（RFC 8707 §2）の正規形を示す。

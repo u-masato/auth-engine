@@ -25,7 +25,7 @@ adapters/{sqlite,postgres}（別 Go Module）
 
 ### 1. レイヤーではなく文脈でパッケージを切る
 
-コアモジュール `github.com/muno/auth-engine`:
+コアモジュール `github.com/u-masato/auth-engine`:
 
 ```
 auth-engine/
@@ -47,7 +47,7 @@ auth-engine/
 │   ├── rand/              # 乱数トークン生成・ハッシュ
 │   └── clock/             # 時刻の注入
 ├── adapters/
-│   ├── sqlite/            # 別モジュール: github.com/muno/auth-engine/adapters/sqlite
+│   ├── sqlite/            # 別モジュール: github.com/u-masato/auth-engine/adapters/sqlite
 │   └── postgres/          # 別モジュール（P2）
 ├── examples/standalone/   # 別モジュール: エンジン + デモ Interaction App（loginapp）+ サンプル Client（oauthclient）
 ├── docs/

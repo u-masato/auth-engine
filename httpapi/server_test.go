@@ -14,15 +14,15 @@ import (
 	"testing"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/httpapi"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/oidc"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/storage/memory"
-	"github.com/muno/auth-engine/token"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/httpapi"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/oidc"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/storage/memory"
+	"github.com/u-masato/auth-engine/token"
 )
 
 const (

@@ -15,7 +15,7 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 
 | モジュール | 役割 | 外部依存 |
 | --- | --- | --- |
-| `.`（`github.com/muno/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
+| `.`（`github.com/u-masato/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
 | `adapters/sqlite` | SQLite Store Adapter（modernc.org/sqlite、goose ライブラリ） | — |
 | `adapters/postgres` | PostgreSQL Store Adapter（pgx/v5、goose）。契約テストは Testcontainers（Docker がなければ Skip、`AUTH_ENGINE_POSTGRES_DSN` で既存 DB も可） | — |
 | `examples/standalone` | デモサーバー、デモ Interaction App（`loginapp`）、サンプルクライアント（`oauthclient`）、開発者コンソール（`console`。Client 登録とフローの手動確認、`127.0.0.1:8083`） | `console` の RP 側 ID Token 検証に go-jose |

@@ -7,13 +7,13 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/oidc"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/oidc"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // Config は Engine の設定。環境変数や設定ファイルの解釈は利用者側で行い、構造体で渡す（ADR-0002）。

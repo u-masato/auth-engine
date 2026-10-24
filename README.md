@@ -33,7 +33,7 @@ cd examples/standalone && go run ./cmd/cli-client
 自分のサービスに載せる手順（Store の選択、Client 登録、2 つの Handler の公開、鍵の保管、監査ログ、本番前の確認）は [組み込みガイド](docs/embedding.md) にまとめてある。コード例は各パッケージの `Example` テスト（`example_test.go`）にあり、`go test` で動作を確かめている。フロー全体を 1 プロセス内で通す例は [httpapi/example_test.go](httpapi/example_test.go) の `Example_authorizationCodeFlow`。
 
 ```bash
-go doc -all github.com/muno/auth-engine/httpapi   # Example を含むパッケージ文書を端末で読む
+go doc -all github.com/u-masato/auth-engine/httpapi   # Example を含むパッケージ文書を端末で読む
 go test -run Example -v ./...                      # Example を実行する
 ```
 
@@ -41,7 +41,7 @@ go test -run Example -v ./...                      # Example を実行する
 
 | モジュール | 内容 | 外部依存 |
 | --- | --- | --- |
-| `github.com/muno/auth-engine` | コア。`client` / `authorization` / `grant` / `token` / `oidc` / `keys` / `httpapi` / `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
+| `github.com/u-masato/auth-engine` | コア。`client` / `authorization` / `grant` / `token` / `oidc` / `keys` / `httpapi` / `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
 | `.../adapters/sqlite` | SQLite Store Adapter | modernc.org/sqlite, goose |
 | `.../adapters/postgres` | PostgreSQL Store Adapter | pgx/v5, goose（テストに Testcontainers） |
 | `.../examples/standalone` | デモサーバー、デモ Interaction App、サンプルクライアント | — |

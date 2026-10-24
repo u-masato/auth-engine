@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/muno/auth-engine/grant"
+	"github.com/u-masato/auth-engine/grant"
 )
 
 // grantView は GET /grants の 1 要素。Claims は含めない（Interaction App が渡したものであり、

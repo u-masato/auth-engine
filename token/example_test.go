@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/storage/memory"
-	"github.com/muno/auth-engine/token"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/storage/memory"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // exampleEngine は Machine クライアント svc を登録した Engine と、svc に client_credentials で

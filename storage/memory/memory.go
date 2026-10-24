@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/storage"
-	"github.com/muno/auth-engine/token"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/storage"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // Store は In-Memory の authengine.Store 実装。

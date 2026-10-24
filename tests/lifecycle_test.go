@@ -14,10 +14,10 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/examples/standalone/oauthclient"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // idTokenClaims は RP が検証する ID Token のクレーム。

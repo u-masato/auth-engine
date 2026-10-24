@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muno/auth-engine/examples/standalone/oauthclient"
+	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
 )
 
 func main() {

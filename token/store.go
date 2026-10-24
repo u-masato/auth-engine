@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/grant"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/grant"
 )
 
 // Store はトークンの永続化 Port。各メソッドは単体で原子的でなければならない（ADR-0005 §2）。

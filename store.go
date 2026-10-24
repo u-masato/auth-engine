@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // Store は Adapter が実装する永続化 Port の全体。

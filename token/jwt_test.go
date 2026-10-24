@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/token"
 )
 
 const (

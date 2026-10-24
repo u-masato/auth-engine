@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/examples/standalone/oauthclient"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // flow は 1 回分のフローの記録。Code フロー（Web / Native）か Client Credentials（Machine）。

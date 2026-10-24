@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // ErrNotFound は、指定した client_id × subject の Grant が存在しない。

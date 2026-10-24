@@ -8,12 +8,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // 期限の既定値と上限（ADR-0003 §5）。

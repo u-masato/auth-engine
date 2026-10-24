@@ -5,10 +5,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/storage"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/storage"
+	"github.com/u-masato/auth-engine/token"
 )
 
 var (

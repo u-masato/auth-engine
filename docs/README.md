@@ -48,5 +48,5 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 3. ADR-0005 の「Port にトランザクション抽象を置かない」こと。全 Port メソッドの第一引数は `context.Context`
 4. ADR-0006 の `Mint` / `Reissue` 却下
 5. ADR-0007 のパッケージ構成（3 層を文脈ごとに統合、Store インターフェースは使う側で定義、合成 Store はルート、永続化は公開フィールド + 規約）
-6. モジュールパスは `github.com/muno/auth-engine`、リポジトリ名は `auth-engine`
+6. モジュールパスは `github.com/u-masato/auth-engine`、リポジトリ名は `auth-engine`
 7. ADR-0008 の MCP 連携の 8 点（Resource Server は静的設定、Access Token の形式は resource ごと、MCP Client Profile で `http://localhost` を許可、CIMD はコアの `cimd` パッケージ、Resource Server ミドルウェアはコアの `resourceserver` パッケージ、DCR は実装しない）。M3 着手前に合意

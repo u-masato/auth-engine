@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // registerForm は登録フォームの入力値。エラー時に入力を残して再表示するために持つ。

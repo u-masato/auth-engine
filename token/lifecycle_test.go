@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/token"
 )
 
 func TestInspect(t *testing.T) {

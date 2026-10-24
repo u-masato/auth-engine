@@ -3,9 +3,9 @@ package token_test
 import (
 	"testing"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/token"
 )
 
 func (f *fixture) machineCreds(t *testing.T) token.Credentials {

@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/storage/memory"
-	"github.com/muno/auth-engine/token"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/storage/memory"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // ExampleService_Revoke は「連携済みアプリ」画面の操作を示す。List で subject の Grant を一覧し、

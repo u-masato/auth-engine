@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/storage/memory"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/storage/memory"
 )
 
 // describe は Profile が固定する性質を 1 行にまとめる（ADR-0004）。

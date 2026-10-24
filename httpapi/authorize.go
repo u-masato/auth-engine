@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/muno/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/authorization"
 )
 
 // handleAuthorize は /authorize（RFC 6749 §3.1）。GET と POST（form）を受ける。

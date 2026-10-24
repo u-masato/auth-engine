@@ -11,7 +11,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/muno/auth-engine/examples/standalone/oauthclient"
+	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
 )
 
 // verifyIDToken は RP の手順で ID Token を検証し、header・claims・各検査の結果を 1 段階にまとめる

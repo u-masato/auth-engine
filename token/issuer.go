@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/resource"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/resource"
 )
 
 // IssueInput は Access Token の発行に必要な情報。Service が Code 交換・Refresh・client_credentials

@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // DefaultIDTokenTTL は ID Token の既定の有効期間。

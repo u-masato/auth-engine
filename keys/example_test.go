@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/muno/auth-engine/keys"
+	"github.com/u-masato/auth-engine/keys"
 )
 
 // jwksSize は JWKS（RFC 7517 §5）に載っている鍵の本数を返す。
