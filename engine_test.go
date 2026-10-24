@@ -8,6 +8,7 @@ import (
 	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage/memory"
+	"github.com/muno/auth-engine/token"
 )
 
 func testKeys(t *testing.T, algs ...string) *keys.Set {
@@ -49,6 +50,9 @@ func TestNew(t *testing.T) {
 	if r, ok := withRes.Authorization.Resources.Lookup("https://mcp.example.com"); !ok || r.EffectiveFormat() != resource.FormatJWT {
 		t.Fatalf("resources not wired: %+v %v", r, ok)
 	}
+	if issuers, ok := withRes.Token.Issuer.(token.ByFormat); !ok || issuers[resource.FormatOpaque] == nil || issuers[resource.FormatJWT] == nil {
+		t.Fatalf("token issuers not wired: %#v", withRes.Token.Issuer)
+	}
 
 	bad := []authengine.Config{
 		{Issuer: "", Store: memory.New(), Keys: ks},
@@ -68,6 +72,8 @@ func TestNew(t *testing.T) {
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "mcp.example.com"}}},                                       // 相対 URI
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "https://a.example.com"}, {URI: "https://A.example.com"}}}, // 重複
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "https://a.example.com", AccessTokenFormat: "paseto"}}},
+		// JWT の署名アルゴリズムに対応する署名鍵がない（Keys は RS256 のみ）
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "https://a.example.com", AccessTokenFormat: resource.FormatJWT, AccessTokenAlg: resource.AlgES256}}},
 	}
 	for i, cfg := range bad {
 		if _, err := authengine.New(cfg); err == nil {

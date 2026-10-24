@@ -32,6 +32,9 @@ type Service struct {
 	// Resources は resource パラメータ（RFC 8707 §2.2）で指定できる Resource Server の集合。
 	// authorization.Service と同じ Set を Engine が配線する。nil なら空集合。
 	Resources *resource.Set
+	// Issuer は Access Token を発行する（ADR-0007 §4）。Engine は形式ごとの ByFormat（Opaque と JWT）を
+	// 配線する。nil なら OpaqueIssuer だけで、JWT を要求する resource は内部エラーになる。
+	Issuer Issuer
 
 	// RefreshTokenTTL は Refresh Token の絶対期限、RefreshTokenIdleTTL はスライド期限。
 	// 0 なら既定値（DefaultRefreshTokenTTL / DefaultRefreshTokenIdleTTL）。
@@ -156,7 +159,7 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 		Status:          FamilyActive,
 		CreatedAt:       now,
 	}
-	access, accessPlain, err := s.newAccessToken(c, family, code.Scopes, audience, now)
+	access, accessPlain, err := s.issueAccessToken(ctx, c, family, code.Scopes, audience, now)
 	if err != nil {
 		return nil, err
 	}
@@ -222,25 +225,29 @@ func (s *Service) revokeFamilyOnReuse(ctx context.Context, code *authorization.A
 		"event", "code.reuse", "client_id", code.ClientID, "grant_id", code.GrantID, "family_id", code.FamilyID)
 }
 
-// newAccessToken は family に属する Opaque な Access Token を生成する。戻り値の平文は応答にのみ使う。
+// issueAccessToken は family に属する Access Token を Issuer で発行する。戻り値の平文は応答にのみ使う。
 // scopes は family.Scopes の、audience は family.Audience の部分集合（要求時の縮小を反映する）。
-func (s *Service) newAccessToken(c *client.Client, family *Family, scopes, audience []string, now time.Time) (*AccessToken, string, error) {
-	plaintext, err := rand.Token(AccessTokenPrefix)
-	if err != nil {
-		return nil, "", err
+//
+// 形式は audience の resource 設定で決まる（ADR-0008 §3）。audience が空なら Opaque。複数の resource は
+// narrowAudience（Set.Resolve）で形式が揃っていることを確認済みなので、先頭の設定を見ればよい。
+func (s *Service) issueAccessToken(ctx context.Context, c *client.Client, family *Family, scopes, audience []string, now time.Time) (*AccessToken, string, error) {
+	in := IssueInput{Client: c, Family: family, Scopes: scopes, Audience: audience, Format: resource.FormatOpaque, Now: now}
+	if len(audience) > 0 {
+		r, ok := s.Resources.Lookup(audience[0])
+		if !ok {
+			return nil, "", fmt.Errorf("token: resource %q is not configured", audience[0])
+		}
+		in.Format, in.Alg = r.EffectiveFormat(), r.EffectiveAlg()
 	}
-	return &AccessToken{
-		Hash:      rand.Hash(plaintext),
-		FamilyID:  family.ID,
-		GrantID:   family.GrantID,
-		ClientID:  c.ID,
-		Subject:   family.Subject,
-		Scopes:    scopes,
-		Audience:  audience,
-		Status:    AccessActive,
-		IssuedAt:  now,
-		ExpiresAt: now.Add(c.EffectiveAccessTokenTTL()),
-	}, plaintext, nil
+	issuer := s.Issuer
+	if issuer == nil {
+		issuer = ByFormat{resource.FormatOpaque: OpaqueIssuer{}}
+	}
+	plaintext, rec, err := issuer.Issue(ctx, in)
+	if err != nil {
+		return nil, "", fmt.Errorf("token: issue access token: %w", err)
+	}
+	return rec, plaintext, nil
 }
 
 // newRefreshToken は family に属する Refresh Token を生成する。期限はスライド期限と

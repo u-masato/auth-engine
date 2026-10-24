@@ -25,6 +25,13 @@ func (f Format) Valid() bool {
 	return f == "" || f == FormatOpaque || f == FormatJWT
 }
 
+// JWT Access Token の署名アルゴリズム（keys.AlgRS256 / keys.AlgES256 と同じ値。
+// このパッケージは葉なので keys を import しない）。
+const (
+	AlgRS256 = "RS256"
+	AlgES256 = "ES256"
+)
+
 var (
 	// ErrInvalid は resource indicator の構文違反、または Resource 設定の不備を表す。
 	ErrInvalid = errors.New("resource: invalid resource indicator")
@@ -55,6 +62,10 @@ type Resource struct {
 	// AccessTokenFormat はこの resource 向け Access Token の形式。空なら FormatOpaque。
 	AccessTokenFormat Format
 
+	// AccessTokenAlg は FormatJWT のときの署名アルゴリズム（RS256 / ES256）。空なら RS256
+	// （RFC 9068 §4 が Resource Server に RS256 のサポートを求めるため）。FormatOpaque では指定しない。
+	AccessTokenAlg string
+
 	// Scopes はこの resource 向けのトークンに付けられる scope の上限。空なら制限しない。
 	// OIDC の標準 scope（openid、profile 等）は認可サーバー自身に向けたものなので制限を受けない
 	// （AllowsScope）。RFC 9728 の scopes_supported にも使う（M3 タスク 6）。
@@ -68,6 +79,13 @@ func (r *Resource) Validate() error {
 	}
 	if !r.AccessTokenFormat.Valid() {
 		return fmt.Errorf("%w: unknown access token format %q for %s", ErrInvalid, r.AccessTokenFormat, r.URI)
+	}
+	switch {
+	case r.AccessTokenAlg == "":
+	case r.EffectiveFormat() != FormatJWT:
+		return fmt.Errorf("%w: access token alg is only valid with the jwt format (%s)", ErrInvalid, r.URI)
+	case r.AccessTokenAlg != AlgRS256 && r.AccessTokenAlg != AlgES256:
+		return fmt.Errorf("%w: unknown access token alg %q for %s", ErrInvalid, r.AccessTokenAlg, r.URI)
 	}
 	seen := make(map[string]struct{}, len(r.Scopes))
 	for _, s := range r.Scopes {
@@ -88,6 +106,17 @@ func (r *Resource) EffectiveFormat() Format {
 		return FormatOpaque
 	}
 	return r.AccessTokenFormat
+}
+
+// EffectiveAlg は既定値を適用した JWT Access Token の署名アルゴリズムを返す。FormatOpaque では空。
+func (r *Resource) EffectiveAlg() string {
+	if r.EffectiveFormat() != FormatJWT {
+		return ""
+	}
+	if r.AccessTokenAlg == "" {
+		return AlgRS256
+	}
+	return r.AccessTokenAlg
 }
 
 // AllowsScope は scope をこの resource 向けのトークンに付けてよいかを返す。

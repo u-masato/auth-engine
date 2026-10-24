@@ -147,6 +147,11 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - fail-closed の追加: 設定から外された resource を Code / Family が持っていると、`resource` 未指定でも `invalid_target` にする（設定変更後に古い Family で発行し続けない）。
   - migration の番号は ADR-0008 の記述（SQLite `00003` / PostgreSQL `00002`）からずれ、タスク 1 で使った番号の次（SQLite `00004` / PostgreSQL `00003`）にした。タスク 1 の migration を適用済みの DB を壊さないため。
   - UserInfo は変更なし（`openid` があれば `aud` に関わらず受理する）。テストで明示した。
+- **タスク 3（2026-10-24 完了）**: `token.Issuer`（`IssueInput` → 平文と `AccessToken` の記録）を実体化し、`OpaqueIssuer`・`JWTIssuer`（RFC 9068）・形式で振り分ける `ByFormat` を置いた。`Engine` は `ByFormat{Opaque, JWT}` を `token.Service.Issuer` に配線し、`Service` は Audience 先頭の resource 設定（`EffectiveFormat` / `EffectiveAlg`）で形式を決める。JWT は `typ: at+jwt`、`iss` `sub` `aud`（常に配列）`exp` `iat` `jti` `client_id` `scope`、認可コード由来なら `auth_time` `acr` `amr`。`keys` に `SignTyped` と `Header.Type` を追加。計画との差分と補足:
+  - JWT の署名アルゴリズムは `Resource.AccessTokenAlg`（RS256 / ES256、既定 RS256）で resource ごとに選ぶ。ADR-0008 §1 の設定例にはなかった項目。`FormatOpaque` では指定できない。`Engine.New` は JWT の resource に対応する署名鍵が `Keys` にあることを起動時に確認する。
+  - `JWTIssuer` は `oidc` ではなく `token` パッケージ（`token/jwt.go`）に置いた。Access Token は OAuth の概念であり、`token` → `keys` の依存は `oidc` → `keys` と同じ向きで循環しない。
+  - Discovery への追加項目はない（RFC 8707 / 9068 はメタデータを定義しない）。
+  - 失効はローカル検証に伝播しないことをテストで明示した（Revocation 後も署名は検証できるが Introspection は `active:false`）。
 
 ### M3 で明示的に先送りするもの
 

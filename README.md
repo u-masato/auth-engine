@@ -14,7 +14,7 @@ M2 まで完了（2026-10-24）。API は安定していない。
   `client_credentials`、Revocation（RFC 7009）、Introspection（RFC 7662）、Grant 管理 API、
   PostgreSQL Adapter。OpenID Conformance Suite（Basic OP）はローカルで実行済みだが、PKCE 必須の設計と
   プランの前提が合わず大半のモジュールは評価できていない（[docs/conformance.md](docs/conformance.md)）
-- M3（MCP 連携: Resource Indicators、CIMD、JWT Access Token）に着手。タスク 2（Audience 付き Access Token と `/token` の `resource`）まで完了
+- M3（MCP 連携: Resource Indicators、CIMD、JWT Access Token）に着手。タスク 3（JWT Access Token）まで完了
 
 ## 試す
 
@@ -63,7 +63,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 
 - PKCE（S256）を使わない Authorization Code Grant は受け付けない。Implicit / Password Grant は提供しない。
 - Client の設定は Client Profile（Web / Native・CLI / M2M）で固定し、RFC の個別設定は開放しない。
-- Access Token は Opaque。Resource Server は Introspection（または同一プロセスなら Go API `Engine.Token.Inspect`）で検証し、応答の `aud` に自分の resource URI が含まれることを確認する。
+- Access Token は既定で Opaque。Resource Server は Introspection（または同一プロセスなら Go API `Engine.Token.Inspect`）で検証し、応答の `aud` に自分の resource URI が含まれることを確認する。`Config.Resources` で JWT（RFC 9068、`typ: at+jwt`）を選んだ resource には JWT を発行し、`/jwks` でローカル検証できる。ただし失効は JWT の `exp` まで伝播しないので、JWT を選ぶ resource は短い `AccessTokenTTL` の Client と組み合わせる。
 - Refresh Token は Rotation 必須。再利用を検知したら Token Family 全体を失効させる。
 - `resource`（RFC 8707）は `Config.Resources` に設定した Resource Server だけを受理し、それ以外は `invalid_target`。設定が空なら `resource` 付きの要求はすべて失敗する（意図したフェイルクローズ。M1 / M2 では黙って受理していた）。
 - 永続化は Store Port 経由。コアモジュールは DB ドライバーを参照しない。

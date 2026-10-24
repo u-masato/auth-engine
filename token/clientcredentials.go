@@ -58,7 +58,7 @@ func (s *Service) clientCredentials(ctx context.Context, c *client.Client, req R
 		ID: familyID, GrantID: g.ID, ClientID: c.ID, Subject: c.ID, Scopes: scopes, Audience: audience,
 		Status: FamilyActive, CreatedAt: now,
 	}
-	access, accessPlain, err := s.newAccessToken(c, family, scopes, audience, now)
+	access, accessPlain, err := s.issueAccessToken(ctx, c, family, scopes, audience, now)
 	if err != nil {
 		return nil, err
 	}
