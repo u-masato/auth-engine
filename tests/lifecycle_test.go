@@ -297,3 +297,60 @@ func TestPromptNoneWithLoginSession(t *testing.T) {
 		t.Fatalf("prompt=login must re-authenticate: %d <= %d", c.AuthTime, firstClaims.AuthTime)
 	}
 }
+
+// authorizeWith は追加パラメータ付きでフローを完走し、ID Token の auth_time を返す。
+// 失敗（認可エラー）のときは error を返す。
+func (s *system) authorizeWith(t *testing.T, b *http.Client, extra string) (int64, error) {
+	t.Helper()
+	flow, cb := s.startFlow(t, "cli", "", []string{"openid"})
+	res, err := b.Get(flow.AuthorizationURL() + extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	code, err := flow.HandleCallback(waitCallback(t, cb))
+	if err != nil {
+		return 0, err
+	}
+	tok, err := flow.Exchange(context.Background(), code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.verifyIDToken(t, tok.IDToken, "cli").AuthTime, nil
+}
+
+// TestMaxAgeReauthentication は loginapp が max_age を解釈し、超過していれば再認証して
+// auth_time を進め、超過していなければ既存セッションの auth_time を保つことを確かめる
+// （OIDC Core §3.1.2.1、Suite の oidcc-max-age-1 / oidcc-max-age-10000 に相当）。
+func TestMaxAgeReauthentication(t *testing.T) {
+	s := newSystem(t, true)
+	b := browser(t)
+	first, err := s.authorizeWith(t, b, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 30 秒後、max_age=60 は満たしているのでセッションを再利用する
+	s.advance(30 * time.Second)
+	if at, err := s.authorizeWith(t, b, "&max_age=60"); err != nil || at != first {
+		t.Fatalf("within max_age must reuse the session: auth_time=%d (first %d), err=%v", at, first, err)
+	}
+	// さらに 2 分後、max_age=60 を超えているので再認証し、auth_time が進む
+	s.advance(2 * time.Minute)
+	second, err := s.authorizeWith(t, b, "&max_age=60")
+	if err != nil || second <= first {
+		t.Fatalf("beyond max_age must re-authenticate: auth_time=%d (first %d), err=%v", second, first, err)
+	}
+	// 再認証後、max_age=0 は常に再認証を求める
+	s.advance(time.Second)
+	if at, err := s.authorizeWith(t, b, "&max_age=0"); err != nil || at <= second {
+		t.Fatalf("max_age=0 must re-authenticate: auth_time=%d (second %d), err=%v", at, second, err)
+	}
+	// prompt=none と超過した max_age の組合せは、再認証できないので login_required
+	s.advance(2 * time.Minute)
+	_, err = s.authorizeWith(t, b, "&max_age=60&prompt=none")
+	var aerr *oauthclient.AuthorizationError
+	if !errors.As(err, &aerr) || aerr.Code != "login_required" {
+		t.Fatalf("prompt=none beyond max_age: %v", err)
+	}
+}

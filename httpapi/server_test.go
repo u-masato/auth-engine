@@ -906,3 +906,66 @@ func mustGrantID(t *testing.T, e *env) string {
 	}
 	return g.ID
 }
+
+// TestAuthorizeAcceptsHintsAndUnknownParameters は、エンジンが解釈しない OIDC のヒント
+// （display、id_token_hint、claims_locales、ui_locales、acr_values、login_hint）と未知の
+// パラメータを付けても認可要求が受理され、Interaction App へ透過されることを確かめる
+// （OIDC Core §3.1.2.1 / §3.1.2.2、Suite の oidcc-display-*, oidcc-id-token-hint,
+// oidcc-claims-locales, oidcc-ensure-request-with-unknown-parameter-succeeds に相当）。
+func TestAuthorizeAcceptsHintsAndUnknownParameters(t *testing.T) {
+	e := newEnv(t)
+	q := authorizeQuery()
+	q.Set("display", "popup")
+	q.Set("id_token_hint", "eyJhbGciOiJub25lIn0.e30.")
+	q.Set("claims_locales", "ja en")
+	q.Set("ui_locales", "ja")
+	q.Set("acr_values", "urn:example:acr:mfa")
+	q.Set("login_hint", "alice@example.com")
+	q.Set("extra_unknown", "ignored")
+	_, txnID, _ := e.authorize(q) // 302 でなければ authorize が失敗させる
+	rec := e.do(e.internal, e.interactionReq(http.MethodGet, "/transactions/"+txnID, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get txn: %d %s", rec.Code, rec.Body)
+	}
+	var view struct {
+		Request struct {
+			UILocales string `json:"ui_locales"`
+			ACRValues string `json:"acr_values"`
+			LoginHint string `json:"login_hint"`
+		} `json:"request"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &view)
+	if view.Request.UILocales != "ja" || view.Request.ACRValues != "urn:example:acr:mfa" || view.Request.LoginHint != "alice@example.com" {
+		t.Fatalf("hints must pass through to the interaction app: %s", rec.Body)
+	}
+	// display=page も受理する。未知の display 値も解釈しないので拒否しない
+	q.Set("display", "page")
+	e.authorize(q)
+}
+
+// TestUserInfoPostWithAuthorizationHeader は RFC 6750 §2.1 のヘッダ方式を POST でも受けることを
+// 確かめる（Suite の oidcc-userinfo-post-header に相当）。
+func TestUserInfoPostWithAuthorizationHeader(t *testing.T) {
+	e := newEnv(t)
+	tokens := e.obtainTokens(t)
+	req := httptest.NewRequest(http.MethodPost, "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec := e.do(e.public, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"sub":"alice"`) {
+		t.Fatalf("userinfo POST with header: %d %s", rec.Code, rec.Body)
+	}
+	// 本文が form-urlencoded で access_token を含まない POST でも、ヘッダがあれば通る
+	req = httptest.NewRequest(http.MethodPost, "/userinfo", strings.NewReader("foo=bar"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	if rec = e.do(e.public, req); rec.Code != http.StatusOK {
+		t.Fatalf("userinfo POST with header and unrelated body: %d %s", rec.Code, rec.Body)
+	}
+	// ヘッダと本文の両方にトークンがあれば invalid_request（RFC 6750 §2: 複数方式の併用禁止）
+	req = httptest.NewRequest(http.MethodPost, "/userinfo", strings.NewReader("access_token="+tokens.AccessToken))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	if rec = e.do(e.public, req); rec.Code != http.StatusBadRequest {
+		t.Fatalf("userinfo with both header and body: %d %s", rec.Code, rec.Body)
+	}
+}

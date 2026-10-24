@@ -123,8 +123,21 @@ ADR-0001「選ばせない」・ADR-0004 §5・RFC 9700 と整合する。2 は 
 | `oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported` | **SKIPPED**（期待どおり） | `request_not_supported` を返す。Suite はこれを許容された挙動として検知しスキップする |
 
 `oidcc-ensure-request-with-valid-pkce-succeeds` が通っていることから、ID Token・JWKS・UserInfo・クライアント認証の
-基本経路は Suite の検証条件を満たしている。残り 30 モジュールが検証している内容（prompt、max_age、scope ごとの
-Claims、Refresh、Code 再利用など）は、E2E テスト（`tests/lifecycle_test.go`）で同等の確認をしている。
+基本経路は Suite の検証条件を満たしている。残り 30 モジュールが検証している内容は自前のテストで押さえる:
+
+| Suite のモジュール | 自前テスト |
+| --- | --- |
+| `oidcc-server`, `oidcc-userinfo-get`, `oidcc-alternate-happy-flow` | `httpapi` の `TestFullAuthorizationCodeFlow`、`tests/lifecycle_test.go` の `TestOIDCTokenLifecycle` |
+| `oidcc-userinfo-post-header`, `oidcc-userinfo-post-body` | `httpapi` の `TestUserInfoPostWithAuthorizationHeader`、`TestFullAuthorizationCodeFlow`（POST 本文） |
+| `oidcc-scope-profile/email/address/phone/all` | `oidc/oidc_test.go` の `TestFilterClaims`、`oidc/userinfo_test.go` |
+| `oidcc-prompt-login`, `oidcc-prompt-none-logged-in / not-logged-in` | `tests` の `TestPromptNoneWithLoginSession` |
+| `oidcc-max-age-1`, `oidcc-max-age-10000` | `tests` の `TestMaxAgeReauthentication`、`authorization/service_test.go`（`max_age` 違反の拒否） |
+| `oidcc-display-page/popup`, `oidcc-id-token-hint`, `oidcc-login-hint`, `oidcc-ui-locales`, `oidcc-claims-locales`, `oidcc-ensure-request-with-acr-values-succeeds`, `oidcc-ensure-request-with-unknown-parameter-succeeds` | `httpapi` の `TestAuthorizeAcceptsHintsAndUnknownParameters` |
+| `oidcc-codereuse`, `oidcc-codereuse-30seconds` | `token/service_test.go` の `TestCodeReuseRevokesFamily`、E2E |
+| `oidcc-refresh-token` | `token/refresh_test.go`、E2E |
+| `oidcc-server-client-secret-post`, `oidcc-ensure-post-request-succeeds` | `httpapi` の `TestTokenEndpointClientAuth`、`TestAuthorizeErrors`（POST /authorize） |
+| `oidcc-ensure-request-without-nonce-succeeds-for-code-flow` | `authorization/request_test.go`（`nonce` は任意） |
+| `oidcc-server-rotate-keys` | `keys/keys_test.go` の検証鍵の保持。JWKS 公開中の差し替えは未検証 |
 
 ### 実行時に直したこと
 
@@ -149,7 +162,7 @@ REVIEW になった 2 件（および `oidcc-response-type-missing` の画面確
 
 - `oidcc-server-rotate-keys` など PKCE を付けない 30 モジュールは評価できていない（上記）。`expected-failures.json` の
   `oidcc-server-rotate-keys` の項目は到達していないため未検証
-- Refresh、Code 再利用、`prompt` / `max_age`、scope ごとの Claims は Suite では未評価（E2E のみ）
+- Refresh、Code 再利用、`prompt` / `max_age`、scope ごとの Claims、ヒント類は Suite では未評価（上の表の自前テストのみ）
 
 ## 補足
 
