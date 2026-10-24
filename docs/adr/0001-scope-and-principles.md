@@ -1,7 +1,7 @@
 # ADR-0001: スコープと設計原則
 
-- 状態: 採用（2026-10-24 合意）
-- 日付: 2026-10-24
+- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: PKCE を使わない Authorization Code Grant に `web-legacy` Profile の例外を設けた（[ADR-0009](0009-web-legacy-profile.md)）
+- 日付: 2026-10-24（2026-10-25 更新）
 
 ## 文脈
 
@@ -36,7 +36,7 @@
 ### 3. 初期リリース（P0）で提供しないもの
 
 - Implicit Grant、Resource Owner Password Credentials Grant、Hybrid Flow（RFC 9700 §2.1.2, §2.4）
-- PKCE を使わない Authorization Code Grant（RFC 9700 §2.1.1）
+- PKCE を使わない Authorization Code Grant（RFC 9700 §2.1.1）。ただし [ADR-0009](0009-web-legacy-profile.md) の `web-legacy` Profile で `nonce` を伴う場合を除く（confidential クライアントは PKCE の代わりに `nonce` を使ってよい、RFC 9700 §2.1.1）
 - `plain` の `code_challenge_method`
 - Dynamic Client Registration（P1 で CIMD と併せて検討 → M3 で実装しないと決定。CIMD が「事前関係なし」の場面を満たす。[ADR-0008](0008-mcp-integration.md) §8）
 - 管理 GUI、マルチテナント、独自プラグイン実行環境
@@ -45,4 +45,4 @@
 ## 影響
 
 - 「参考実装」であることを優先するため、スループット最適化（キャッシュ層、非同期書き込み等）は原則として行わない。
-- 「選ばせない」方針の結果、PKCE 非対応のレガシークライアントは接続できない。これは意図した制約として README に明記する。
+- 「選ばせない」方針の結果、PKCE 非対応のレガシークライアントは接続できない。これは意図した制約として README に明記する。例外は `nonce` を使う confidential な OIDC クライアントで、`web-legacy` Profile で接続できる（ADR-0009）。PKCE も `nonce` も使わないクライアントは引き続き接続できない。

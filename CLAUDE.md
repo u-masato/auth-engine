@@ -45,7 +45,7 @@ go test -race ./authorization/            # 1 パッケージ
 - Store インターフェースは**使う側の文脈パッケージ**で定義し、ルート `authengine.Store` で合成する。`storage` はセンチネルエラーだけの葉パッケージ。
 - Store の各メソッドは単体で原子的。Port に `BeginTx` を置かない。競合は `ConsumeAuthorizationCode` `RotateRefreshToken` `IssueTokens` `RevokeGrant` のような意図を表す 1 メソッドで解く。全 Adapter は `storage/storagetest` を通す。
 - 全 Port メソッドの第一引数は `context.Context`。`ctx` に値を載せて挙動を変えない。
-- Client Profile（Web / Native / Machine / MCP）で grant_type・PKCE・認証方式・redirect 照合を固定する。個別フラグの開放や Custom Profile は作らない。PKCE なし、`plain`、Implicit、Password Grant、Dynamic Client Registration は実装しない。
+- Client Profile（Web / Native / Machine / MCP、ADR-0009 の Web Legacy は未実装）で grant_type・PKCE・認証方式・redirect 照合を固定する。個別フラグの開放や Custom Profile は作らない。`plain`、Implicit、Password Grant、Dynamic Client Registration は実装しない。PKCE なしは ADR-0009 の `web-legacy` に限り、`openid` と `nonce` を必須とする（`code_challenge` なしの Code に `code_verifier` が来たら拒否する）。
 - 秘密値（Code、トークン、Resume Token、Client Secret）は 256 bit 乱数で、保存は SHA-256 ハッシュのみ。比較は定数時間（`internal/rand`）。
 - 状態遷移は fail-closed。Resume は CAS で `consumed` にしてから Code を作る。Code 交換は先に消費し、検証失敗でも戻さない。
 - Code 再利用の検知で失効させるのは Token Family（Grant ではない）。
