@@ -81,7 +81,7 @@ func newSystemWith(t *testing.T, autoApprove bool, mod func(*authengine.Config))
 	t.Cleanup(s.internal.Close)
 
 	login, err := loginapp.New(loginapp.Config{InteractionAPI: s.internal.URL, APIToken: apiToken, AutoApprove: autoApprove, AutoSubject: "alice",
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: s.clock})
+		Logger: slog.New(slog.DiscardHandler), Now: s.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func newSystemWith(t *testing.T, autoApprove bool, mod func(*authengine.Config))
 	}
 	cfg := authengine.Config{
 		Issuer: s.public.URL, Store: store, Keys: s.keys, Now: s.clock,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 	}
 	if mod != nil {
 		mod(&cfg)

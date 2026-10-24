@@ -65,16 +65,9 @@ func (s *Store) CreateClient(ctx context.Context, c *client.Client) error {
 		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE id = ?`, c.ID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists > 0 {
-			return storage.ErrAlreadyExists
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO clients (`+clientColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		return insertOnce(ctx, tx, `INSERT INTO clients (`+clientColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO NOTHING`,
 			c.ID, string(c.Profile), c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources, c.SecretHash,
 			int64(c.AccessTokenTTL), c.IDTokenAlg, boolInt(c.AllowInsecureLocalhost), mustNanos(c.CreatedAt))
-		return err
 	})
 }

@@ -73,7 +73,7 @@ func testResources(t *testing.T) *resource.Set {
 	return set
 }
 
-func parse(t *testing.T, clients fakeResolver, p url.Values) (*Request, *client.Client, *Error) {
+func parse(t *testing.T, clients fakeResolver, p url.Values) (*Request, *Error) {
 	t.Helper()
 	return parseRequest(context.Background(), clients, testResources(t), p)
 }
@@ -100,11 +100,11 @@ func TestParseRequestSuccess(t *testing.T) {
 	p.Add("resource", "https://mcp.example.com")
 	p.Add("resource", "https://api.example.com") // 正規形で重複
 	p.Add("resource", "")                        // 値なしは省略扱い（RFC 6749 §3.1）
-	req, c, perr := parse(t, testClients(t), p)
+	req, perr := parse(t, testClients(t), p)
 	if perr != nil {
 		t.Fatal(perr)
 	}
-	if c.ID != "web" || req.ClientID != "web" || req.RedirectURI != "https://app.example.com/cb?env=prod" || !req.RedirectURIExplicit {
+	if req.ClientID != "web" || req.RedirectURI != "https://app.example.com/cb?env=prod" || !req.RedirectURIExplicit {
 		t.Fatalf("client/redirect: %+v", req)
 	}
 	if !slices.Equal(req.Scopes, []string{"openid", "profile"}) || req.State != "xyz" || req.Nonce != "n-0S6_WzA2Mj" {
@@ -124,7 +124,7 @@ func TestParseRequestSuccess(t *testing.T) {
 func TestParseRequestWithoutResource(t *testing.T) {
 	// resource なしの要求は従来どおり受理し、Resource は空（ADR-0008 §2）。設定が空でも同じ。
 	for _, set := range []*resource.Set{testResources(t), nil} {
-		req, _, perr := parseRequest(context.Background(), testClients(t), set, baseParams())
+		req, perr := parseRequest(context.Background(), testClients(t), set, baseParams())
 		if perr != nil || len(req.Resource) != 0 {
 			t.Fatalf("resource-less request: %+v %v", req, perr)
 		}
@@ -162,7 +162,7 @@ func TestParseRequestResourceErrors(t *testing.T) {
 			if set == nil {
 				set = testResources(t)
 			}
-			_, _, perr := parseRequest(context.Background(), testClients(t), set, p)
+			_, perr := parseRequest(context.Background(), testClients(t), set, p)
 			if perr == nil {
 				t.Fatal("want error")
 			}
@@ -179,12 +179,12 @@ func TestParseRequestResourceErrors(t *testing.T) {
 	p := baseParams()
 	p.Set("client_id", "limited")
 	p.Set("resource", "https://api.example.com")
-	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+	if _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("allowed resource: %v", perr)
 	}
 	p = baseParams()
 	p.Set("resource", "https://jwt.example.com")
-	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+	if _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("single jwt resource: %v", perr)
 	}
 }
@@ -195,23 +195,23 @@ func TestParseRequestResourceScopeLimit(t *testing.T) {
 	p.Set("client_id", "files")
 	p.Set("resource", "https://files.example.com")
 	p.Set("scope", "openid files:read")
-	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+	if _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("allowed scope: %v", perr)
 	}
 	p.Set("scope", "openid files:write")
-	_, _, perr := parse(t, testClients(t), p)
+	_, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Code != CodeInvalidScope || !strings.Contains(perr.Description, "files:write") || !perr.Redirectable() {
 		t.Fatalf("scope outside the resource limit must be a redirectable invalid_scope: %+v", perr)
 	}
 	// resource なしなら resource の scope 上限は関係ない
 	p.Del("resource")
-	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+	if _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("without resource: %v", perr)
 	}
 	// 上限のない resource と組み合わせれば、どちらかが許すので通る
 	p.Add("resource", "https://files.example.com")
 	p.Add("resource", "https://api.example.com")
-	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+	if _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("another resource without limit allows the scope: %v", perr)
 	}
 }
@@ -222,7 +222,7 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	p.Del("redirect_uri")
 	p.Set("scope", "openid  openid")
 	// OIDC（openid あり）では redirect_uri を省略できない。リダイレクト先が確定しないのでエラーページ
-	_, _, perr := parse(t, testClients(t), p)
+	_, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Code != CodeInvalidRequest || perr.Redirectable() {
 		t.Fatalf("openid without redirect_uri must be a non-redirectable invalid_request: %v", perr)
 	}
@@ -235,7 +235,7 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	clients["plain"] = plain
 	p.Set("client_id", "plain")
 	p.Set("scope", "read  read")
-	req, _, perr := parse(t, clients, p)
+	req, perr := parse(t, clients, p)
 	if perr != nil {
 		t.Fatal(perr)
 	}
@@ -263,7 +263,7 @@ func TestParseRequestNonRedirectableErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := baseParams()
 			tt.mod(p)
-			_, _, perr := parse(t, testClients(t), p)
+			_, perr := parse(t, testClients(t), p)
 			if perr == nil {
 				t.Fatal("want error")
 			}
@@ -306,7 +306,7 @@ func TestParseRequestRedirectableErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := baseParams()
 			tt.mod(p)
-			_, _, perr := parse(t, testClients(t), p)
+			_, perr := parse(t, testClients(t), p)
 			if perr == nil {
 				t.Fatal("want error")
 			}
@@ -336,7 +336,7 @@ func TestParseRequestMachineClientCannotAuthorize(t *testing.T) {
 	p := baseParams()
 	p.Set("client_id", "svc")
 	p.Set("scope", "api")
-	_, _, perr := parse(t, testClients(t), p)
+	_, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Redirectable() {
 		t.Fatalf("machine client must fail without redirect: %+v", perr)
 	}
@@ -349,13 +349,13 @@ func TestParseRequestOpenIDRequiresIDTokenProfile(t *testing.T) {
 	p.Set("client_id", "cli")
 	p.Set("redirect_uri", "http://127.0.0.1:9999/cb")
 	p.Set("scope", "openid profile")
-	_, _, perr := parse(t, testClients(t), p)
+	_, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Code != CodeInvalidScope {
 		t.Fatalf("want invalid_scope, got %+v", perr)
 	}
 	// loopback のポート違いは許される
 	p.Set("scope", "openid")
-	req, _, perr := parse(t, testClients(t), p)
+	req, perr := parse(t, testClients(t), p)
 	if perr != nil || req.RedirectURI != "http://127.0.0.1:9999/cb" {
 		t.Fatalf("loopback port: %+v %v", req, perr)
 	}

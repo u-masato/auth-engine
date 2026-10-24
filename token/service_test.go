@@ -3,7 +3,6 @@ package token_test
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -64,7 +63,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	clk := clock.NewFixed(now)
 	return &fixture{
-		svc:       &token.Service{Clients: store, Store: store, Grants: store, Clock: clk, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
+		svc:       &token.Service{Clients: store, Store: store, Grants: store, Clock: clk, Logger: slog.New(slog.DiscardHandler)},
 		store:     store,
 		clock:     clk,
 		ctx:       ctx,

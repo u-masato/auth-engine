@@ -49,7 +49,7 @@ func (s *Server) handleListGrants(w http.ResponseWriter, r *http.Request) {
 		grants, err = s.engine.Grants.List(r.Context(), subject)
 	}
 	if err != nil {
-		s.interactionInternalError(w, r, err)
+		s.jsonInternalError(w, r, err)
 		return
 	}
 	body := grantsBody{Grants: make([]grantView, 0, len(grants))}

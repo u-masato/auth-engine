@@ -96,7 +96,7 @@ func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time
 	if err != nil {
 		return nil, fmt.Errorf("token: get grant: %w", err)
 	}
-	if rt.Status != RefreshActive || !now.Before(rt.ExpiresAt) || !family.Active() || !g.Active() {
+	if rt.Status != RefreshActive || rt.Expired(now) || !family.Active() || !g.Active() {
 		return &Introspection{Kind: HintRefreshToken}, nil
 	}
 	return &Introspection{

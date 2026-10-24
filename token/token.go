@@ -76,9 +76,12 @@ type AccessToken struct {
 	RevokedAt time.Time // ゼロ値なら未失効
 }
 
+// Expired は now 時点で期限切れかを返す。ExpiresAt ちょうどは期限切れとする。
+func (t *AccessToken) Expired(now time.Time) bool { return !now.Before(t.ExpiresAt) }
+
 // Valid は now 時点で有効（未失効・未期限）かを返す。Grant / Family の状態は含まない。
 func (t *AccessToken) Valid(now time.Time) bool {
-	return t.Status == AccessActive && now.Before(t.ExpiresAt)
+	return t.Status == AccessActive && !t.Expired(now)
 }
 
 // RefreshStatus は Refresh Token の状態。
@@ -102,6 +105,9 @@ type RefreshToken struct {
 	RotatedAt      time.Time // ゼロ値なら未 Rotation
 	RevokedAt      time.Time // ゼロ値なら未失効
 }
+
+// Expired は now 時点で期限切れかを返す。ExpiresAt ちょうどは期限切れとする。
+func (t *RefreshToken) Expired(now time.Time) bool { return !now.Before(t.ExpiresAt) }
 
 // トークン平文の接頭辞。ログやシークレットスキャナでの識別用。
 const (

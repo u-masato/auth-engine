@@ -45,3 +45,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeJSONError(w http.ResponseWriter, status int, code, description string) {
 	writeJSON(w, status, errorBody{Error: code, Description: description})
 }
+
+// jsonInternalError は JSON を返すエンドポイントの内部障害を記録し、500 を返す。
+func (s *Server) jsonInternalError(w http.ResponseWriter, r *http.Request, err error) {
+	s.logger.ErrorContext(r.Context(), "internal error", "event", "http.internal_error", "path", r.URL.Path, "error", err)
+	writeJSONError(w, http.StatusInternalServerError, "server_error", "internal error")
+}

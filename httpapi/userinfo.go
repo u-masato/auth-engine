@@ -44,8 +44,7 @@ func (s *Server) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="userinfo", error="insufficient_scope", scope="openid"`)
 		writeJSONError(w, http.StatusForbidden, "insufficient_scope", "the access token lacks the openid scope")
 	default:
-		s.logger.ErrorContext(r.Context(), "userinfo internal error", "event", "http.internal_error", "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "server_error", "internal error")
+		s.jsonInternalError(w, r, err)
 	}
 }
 

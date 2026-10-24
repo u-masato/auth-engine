@@ -177,7 +177,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		case token.RefreshRevoked:
 			return storage.ErrFamilyRevoked
 		}
-		if !now.Before(old.ExpiresAt) {
+		if old.Expired(now) {
 			return storage.ErrNotFound
 		}
 		var familyStatus, grantStatus string

@@ -118,13 +118,6 @@ func scanRefresh(row rowScanner) (*token.RefreshToken, error) {
 }
 
 func insertAccess(ctx context.Context, tx *sql.Tx, t *token.AccessToken) error {
-	var dup int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM access_tokens WHERE hash = ?`, t.Hash).Scan(&dup); err != nil {
-		return err
-	}
-	if dup > 0 {
-		return storage.ErrAlreadyExists
-	}
 	scopes, err := mustJSON(t.Scopes)
 	if err != nil {
 		return err
@@ -133,24 +126,17 @@ func insertAccess(ctx context.Context, tx *sql.Tx, t *token.AccessToken) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_tokens (`+accessColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	return insertOnce(ctx, tx, `INSERT INTO access_tokens (`+accessColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (hash) DO NOTHING`,
 		t.Hash, t.FamilyID, t.GrantID, t.ClientID, t.Subject, scopes, audience, string(t.Status),
 		mustNanos(t.IssuedAt), mustNanos(t.ExpiresAt), nanos(t.RevokedAt))
-	return err
 }
 
 func insertRefresh(ctx context.Context, tx *sql.Tx, t *token.RefreshToken) error {
-	var dup int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM refresh_tokens WHERE hash = ?`, t.Hash).Scan(&dup); err != nil {
-		return err
-	}
-	if dup > 0 {
-		return storage.ErrAlreadyExists
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO refresh_tokens (`+refreshColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	return insertOnce(ctx, tx, `INSERT INTO refresh_tokens (`+refreshColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (hash) DO NOTHING`,
 		t.Hash, t.FamilyID, string(t.Status), t.ReplacedByHash,
 		mustNanos(t.IssuedAt), mustNanos(t.ExpiresAt), nanos(t.RotatedAt), nanos(t.RevokedAt))
-	return err
 }
 
 // IssueTokens は Grant が active であることを同じトランザクション内で確認してから挿入する。
@@ -176,14 +162,8 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 		if err != nil {
 			return err
 		}
-		var dup int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM token_families WHERE id = ?`, family.ID).Scan(&dup); err != nil {
-			return err
-		}
-		if dup > 0 {
-			return storage.ErrAlreadyExists
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO token_families (`+familyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		err = insertOnce(ctx, tx, `INSERT INTO token_families (`+familyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO NOTHING`,
 			family.ID, family.GrantID, family.ClientID, family.Subject, scopes, audience, nanos(family.AuthenticatedAt), amr, family.ACR,
 			string(family.Status), mustNanos(family.CreatedAt), nanos(family.ExpiresAt), nanos(family.RevokedAt))
 		if err != nil {
@@ -212,7 +192,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		case token.RefreshRevoked:
 			return storage.ErrFamilyRevoked
 		}
-		if !now.Before(old.ExpiresAt) {
+		if old.Expired(now) {
 			return storage.ErrNotFound
 		}
 		var familyStatus, grantStatus string
@@ -264,11 +244,11 @@ func (s *Store) GetTokenFamily(ctx context.Context, id string) (*token.Family, e
 
 func (s *Store) RevokeTokenFamily(ctx context.Context, familyID string, now time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM token_families WHERE id = ?`, familyID).Scan(&exists); err != nil {
+		ok, err := exists(ctx, tx, `SELECT COUNT(*) FROM token_families WHERE id = ?`, familyID)
+		if err != nil {
 			return err
 		}
-		if exists == 0 {
+		if !ok {
 			return storage.ErrNotFound
 		}
 		return revokeFamiliesWhere(ctx, tx, `id = ?`, familyID, now)
@@ -303,11 +283,11 @@ func (s *Store) RevokeAccessToken(ctx context.Context, hash string, now time.Tim
 		if n, _ := res.RowsAffected(); n == 1 {
 			return nil
 		}
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM access_tokens WHERE hash = ?`, hash).Scan(&exists); err != nil {
+		ok, err := exists(ctx, tx, `SELECT COUNT(*) FROM access_tokens WHERE hash = ?`, hash)
+		if err != nil {
 			return err
 		}
-		if exists == 0 {
+		if !ok {
 			return storage.ErrNotFound
 		}
 		return nil

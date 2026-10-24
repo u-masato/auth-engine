@@ -32,7 +32,7 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
+	discard := slog.New(slog.DiscardHandler)
 	store := memory.New()
 
 	var publicHandler, internalHandler, consoleHandler http.Handler

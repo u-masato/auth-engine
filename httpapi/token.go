@@ -37,8 +37,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 			s.writeTokenError(w, r, perr)
 			return
 		}
-		s.logger.ErrorContext(r.Context(), "token endpoint internal error", "event", "http.internal_error", "error", err)
-		writeJSONError(w, http.StatusInternalServerError, "server_error", "internal error")
+		s.jsonInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)

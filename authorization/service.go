@@ -68,7 +68,7 @@ func (s *Service) Begin(ctx context.Context, params url.Values, browserBinding s
 	if browserBinding == "" {
 		return nil, errors.New("authorization: browser binding is required")
 	}
-	req, _, perr := parseRequest(ctx, s.Clients, s.Resources, params)
+	req, perr := parseRequest(ctx, s.Clients, s.Resources, params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -157,8 +157,10 @@ func (s *Service) Reject(ctx context.Context, txnID string, rej Rejection) (stri
 	return token, nil
 }
 
-// pendingTransaction は Complete / Reject の前提（存在・未期限・pending）を確認する。
-func (s *Service) pendingTransaction(ctx context.Context, id string) (*Transaction, error) {
+// Transaction は存在し期限内の Transaction を返す。Interaction App が UI を描くための
+// GET /transactions/{id} と、Complete / Reject / Resume の前提確認に使う（ADR-0003 §3 (4)）。
+// 存在しなければ ErrTransactionNotFound、期限切れなら ErrTransactionExpired を返す。
+func (s *Service) Transaction(ctx context.Context, id string) (*Transaction, error) {
 	txn, err := s.Store.GetTransaction(ctx, id)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -168,6 +170,15 @@ func (s *Service) pendingTransaction(ctx context.Context, id string) (*Transacti
 	}
 	if txn.Expired(s.Clock.Now()) {
 		return nil, ErrTransactionExpired
+	}
+	return txn, nil
+}
+
+// pendingTransaction は Complete / Reject の前提（存在・未期限・pending）を確認する。
+func (s *Service) pendingTransaction(ctx context.Context, id string) (*Transaction, error) {
+	txn, err := s.Transaction(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	if txn.Status != StatusPending {
 		return nil, ErrTransactionNotPending
@@ -203,16 +214,9 @@ func mapTransitionError(err error) error {
 // 書き込みの順序は fail-closed にする: まず Txn を consumed に遷移させ（CAS）、その後に
 // Grant と Code を作る。途中で失敗しても Txn は消費済みで、Code は存在しない。
 func (s *Service) Resume(ctx context.Context, txnID, resumeToken, browserBinding string) (string, error) {
-	txn, err := s.Store.GetTransaction(ctx, txnID)
+	txn, err := s.Transaction(ctx, txnID)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return "", ErrTransactionNotFound
-		}
 		return "", err
-	}
-	now := s.Clock.Now()
-	if txn.Expired(now) {
-		return "", ErrTransactionExpired
 	}
 	if txn.Status != StatusCompleted && txn.Status != StatusRejected {
 		return "", ErrResumeDenied
@@ -235,7 +239,7 @@ func (s *Service) Resume(ctx context.Context, txnID, resumeToken, browserBinding
 		perr := &Error{Code: txn.Rejection.Error, Description: txn.Rejection.Description, RedirectURI: txn.Request.RedirectURI, State: txn.Request.State}
 		return perr.RedirectURL(s.Issuer), nil
 	}
-	return s.issueCode(ctx, txn, now)
+	return s.issueCode(ctx, txn, s.Clock.Now())
 }
 
 // issueCode は completed な Txn から Grant を更新し、Code を発行して成功応答 URL を返す。

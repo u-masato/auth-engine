@@ -106,7 +106,7 @@ func (f *fixture) advance(d time.Duration) {
 func newFixture(t *testing.T, mod func(c *cimd.Config)) *fixture {
 	t.Helper()
 	f := &fixture{docServer: newDocServer(t), now: base}
-	cfg := cimd.Config{HTTPClient: f.httpClient(true), Now: f.clock, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	cfg := cimd.Config{HTTPClient: f.httpClient(true), Now: f.clock, Logger: slog.New(slog.DiscardHandler)}
 	if mod != nil {
 		mod(&cfg)
 	}
