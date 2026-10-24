@@ -26,3 +26,6 @@ var (
 	// ErrGrantRevoked は、失効済みの Grant に対してトークン発行が要求されたことを表す。
 	ErrGrantRevoked = errors.New("storage: grant revoked")
 )
+
+// ErrFamilyRevoked は、失効済みの Token Family に属するトークンの操作が要求されたことを表す。
+var ErrFamilyRevoked = errors.New("storage: token family revoked")
