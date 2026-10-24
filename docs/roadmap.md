@@ -169,6 +169,11 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - 認可サーバーメタデータ（RFC 8414）は `Issuer` から 1 回取得して `issuer` の一致を確認する（§3.3）。`Endpoint` / `JWKSURI` を直接与えればメタデータは取得しない。
   - `scripts/check-core-deps.sh` に、`resourceserver` が認可サーバー側のパッケージ（ルート、`httpapi`、`authorization`、`token` 等）に依存しないことの検査を足した（ADR-0008 §7 の「同様の検査で守る」）。
   - クエリやフォームの `access_token`（RFC 6750 §2.2、§2.3）は受け付けない（`bearer_methods_supported` は `header` のみ）。
+- **タスク 7（2026-10-25 完了）**: `cmd/server` に `-resources`（JSON。`uri` `name` `access_token_format` `access_token_alg` `scopes`）、`-cimd`（既定 true）、`-cimd-allow-loopback`、`-cimd-ca`（文書サーバーの証明書を信頼する）、`-clients` の `mcp` Profile（`client.NewMCP` で事前登録。CIMD §7）と `resources` 項目。`cmd/mcp-server`（`resourceserver` を使う最小の Resource Server。`/mcp` は `mcp:read`、`/mcp/admin` は `mcp:write`、既定は JWT のローカル検証、`-introspect` で Introspection）。`cmd/cimd-host`（CIMD 文書を自己署名 TLS で配る。組み込みの `/demo-cli.json` を `client.NewMCP` で自己検証してから配る）。`oauthclient` に `CodeFlow.Resources`（認可要求とトークン要求の `resource`）、`DiscoverResource`（401 の `WWW-Authenticate` → RFC 9728 メタデータ → `authorization_servers`）、`ParseChallenge`、`CallResource`。`cli-client` に `-client-id-url` `-resource`（複数可）`-mcp`。loginapp の同意画面に `client_id` と redirect URI のホスト名、localhost の注意書き、`client_uri`（文字列）、`resource`。`demo.sh start` が 3 サーバーをまとめて起動し、`demo.sh mcp-flow` で CIMD の `client_id` から `/mcp` の 200 まで通ることを確認した。計画との差分と補足:
+  - CIMD の `client_id` は https 必須（CIMD §3）なので、ローカルの文書配信は自己署名証明書を使う `cmd/cimd-host` にし、認可サーバー側に `-cimd-ca` を足した（`cimd.NewTransport` に `RootCAs` を加えた HTTPClient を `cimd.Config.HTTPClient` に渡す。計画では `-cimd-allow-loopback` だけだった）。TLS 検証を外す選択肢は作らない。
+  - `cli-client` は `-resource` を直接与えるだけでなく、`-mcp` で MCP 仕様「Authorization Server Location」の手順（401 → `resource_metadata` → `authorization_servers`）を実際に辿る。`oauthclient.DiscoverResource` はメタデータの `resource` が要求した URL と一致しないと拒否する（RFC 9728 §3.3）。
+  - loginapp は redirect URI のホスト名を MCP 以外の Profile でも出す（表示する情報を Profile で分けない方が単純で、Native の loopback にも同じ注意書きが当てはまる）。`client_uri` はエンジンが到達性を確認していないのでリンクにせず文字列で出す。
+  - `-cimd` は既定で有効にした。デモサーバーは MCP 連携を試す入口でもあるため。本番の組み込みでは `Config.CIMD` を明示的に与える（`docs/embedding.md`）。
 
 ### M3 で明示的に先送りするもの
 

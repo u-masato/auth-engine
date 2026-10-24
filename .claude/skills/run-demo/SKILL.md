@@ -24,11 +24,18 @@ $S start -auto-approve    # 画面を出さず demo-user で全承認（自動�
 $S status                 # 起動中か、Discovery に届くか、ポートを誰が使っているか
 $S flow                   # cli-client で認可フロー。-auto-approve 起動なら承認まで全自動
 $S flow-wait              # ブラウザで承認した後、トークンの結果を表示
+$S mcp-flow               # MCP クライアント（CIMD の client_id）として認可を受け、MCP サーバーの /mcp を呼ぶ
 $S logs [N]               # サーバーログの末尾
 $S stop                   # 停止
 $S reset                  # 停止して auth.db と keys.json を削除（次回起動で再生成。署名鍵も変わる）
 ```
 
+`start` は認可サーバーに加えて、デモ MCP サーバー（`cmd/mcp-server`、base+10、`http://localhost:8090/mcp`）と
+CIMD 文書の配信（`cmd/cimd-host`、base+11、自己署名 TLS、`client_id` は `https://localhost:8091/demo-cli.json`）も
+起動し、認可サーバーには `-resources`（MCP サーバーを JWT Access Token で登録）、`-cimd-allow-loopback`、`-cimd-ca` を渡す。
+`stop` は 3 つとも止める。「MCP で試して」「CIMD のクライアントで」「Resource Server に届くか」と言われたら `mcp-flow`
+（`-auto-approve` 起動なら承認まで全自動。通常起動なら `flow` と同じく URL をブラウザで開いて `flow-wait`）。
+MCP の同意画面には client_id のホスト名と redirect 先のホスト名、localhost の注意書きが出る。
 `start` の残りの引数はそのまま server に渡る（`-clients ../../conformance/clients.json` など）。
 ポートを変えるときは `DEMO_PORT_BASE=8090 $S start` のように環境変数で指定する。
 公開 = base、Interaction API = base+1、ログイン画面 = base+2、開発者コンソール = base+3 で、issuer・login-url・console-url も追従する。

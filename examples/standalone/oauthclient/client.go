@@ -2,7 +2,8 @@
 // 最小限の OAuth 2.0 クライアントである。サンプル CLI と E2E テストで使う。
 //
 // 対応する仕様: RFC 6749 §4.1 / §4.4 / §6、RFC 7009、RFC 7636（S256）、RFC 7662、RFC 8252 §7.3（loopback redirect）、
-// RFC 8414（メタデータ取得）、RFC 9207（iss の検証）、OIDC Core §5.3（UserInfo）。
+// RFC 8414（メタデータ取得）、RFC 8707（resource）、RFC 9207（iss の検証）、RFC 9728（Protected Resource Metadata）、
+// OIDC Core §5.3（UserInfo）、MCP Authorization Specification（CIMD の client_id、Resource Server の発見）。
 package oauthclient
 
 import (
@@ -64,7 +65,10 @@ type CodeFlow struct {
 	ClientSecret string // confidential クライアントのみ。空なら public
 	RedirectURI  string
 	Scopes       []string
-	HTTPClient   *http.Client
+	// Resources は認可要求とトークン要求に付ける resource（RFC 8707 §2 / §2.2）。MCP クライアントは
+	// 対象の MCP サーバーの URI を 1 つ入れる。空なら resource なし（Opaque の従来フロー）。
+	Resources  []string
+	HTTPClient *http.Client
 	// Extra は認可要求に足すパラメータ（nonce、prompt、login_hint、max_age など）。
 	// response_type や PKCE のように CodeFlow が決めるパラメータは上書きできない。
 	Extra url.Values
@@ -106,6 +110,9 @@ func (f *CodeFlow) AuthorizationURL() string {
 		"state":                 {f.state},
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
+	}
+	if len(f.Resources) > 0 {
+		q["resource"] = f.Resources // RFC 8707 §2: 複数指定できる
 	}
 	for k, v := range f.Extra {
 		if _, ok := q[k]; !ok {
@@ -170,12 +177,16 @@ func (e *TokenError) Error() string {
 
 // Exchange は Code をトークンに交換する。
 func (f *CodeFlow) Exchange(ctx context.Context, code string) (*TokenResponse, error) {
-	return f.tokenRequest(ctx, url.Values{
+	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {f.RedirectURI},
 		"code_verifier": {f.verifier},
-	})
+	}
+	if len(f.Resources) > 0 {
+		form["resource"] = f.Resources // RFC 8707 §2.2: 認可要求の resource の部分集合
+	}
+	return f.tokenRequest(ctx, form)
 }
 
 // Refresh は Refresh Token で新しいトークンを得る（RFC 6749 §6）。scope は空なら省略。

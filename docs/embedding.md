@@ -117,7 +117,8 @@ authengine.Config{
 - **文書はプロセス内にキャッシュされる。** `Cache-Control: max-age` を尊重し、既定で 1 分〜24 時間に収める。取得失敗と不正な文書はキャッシュしない。複数インスタンスでキャッシュは共有されない（各インスタンスが取得する）。
 - **MCP クライアントは `resource` が必須。** `Config.Resources` に MCP サーバーを列挙していないと、MCP クライアントの要求はすべて失敗する。
 - **信頼の判断は組み込む側に委ねる。** 既定ではどのドメインの `client_id` も受け入れる。許可リストは `cimd.HostAllowlist`、それ以上（初回利用の確認、評判サービス）は `cimd.TrustPolicy` を実装する。拒否された `client_id` の要求は `invalid_request`（認可要求）/ `invalid_client`（トークン要求）になる。
-- Interaction App は MCP クライアントの `client_id` と redirect URI のホスト名を同意画面に出す必要がある（[Interaction API 仕様](interaction-api.md)「`profile` が `mcp` のとき」）。
+- Interaction App は MCP クライアントの `client_id` と redirect URI のホスト名を同意画面に出す必要がある（[Interaction API 仕様](interaction-api.md)「`profile` が `mcp` のとき」）。表示の例は [`examples/standalone/loginapp`](../examples/standalone/loginapp/loginapp.go)。
+- ローカルで試すには [`examples/standalone`](../examples/standalone/README.md)「MCP クライアントとして MCP サーバーにアクセスする」。CIMD の `client_id` は https 必須なので、文書の配信サーバー `cmd/cimd-host` が自己署名証明書を使い、`cmd/server` は `-cimd-allow-loopback -cimd-ca` でそれを信頼する。
 
 ## 5. HTTP への公開
 
@@ -179,7 +180,7 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
   - JWT を選ぶ resource には、`AccessTokenTTL` の短い Client を組み合わせる。失効させても、ローカル検証では `exp` まで有効に見えるためである。
   - `Engine.New` は、JWT を選んだ resource の署名アルゴリズムに対応する鍵が `Keys` にあることを起動時に確かめる。ES256 を選ぶなら ES256 の署名鍵も用意する。
   - Resource Server は JWKS をキャッシュするので、鍵をローテーションするときは §6 の手順で旧鍵を残しておく。
-- **MCP サーバーなど、本リポジトリの Resource Server を Go で書くなら `resourceserver` パッケージを使う**（[ADR-0008](adr/0008-mcp-integration.md) §7）。例は [`resourceserver.ExampleNew`](../resourceserver/example_test.go)。
+- **MCP サーバーなど、本リポジトリの Resource Server を Go で書くなら `resourceserver` パッケージを使う**（[ADR-0008](adr/0008-mcp-integration.md) §7）。例は [`resourceserver.ExampleNew`](../resourceserver/example_test.go) と、起動できる形の [`examples/standalone/cmd/mcp-server`](../examples/standalone/cmd/mcp-server/main.go)。
   - `resourceserver.New` に自分の `Resource`（認可サーバーの `Config.Resources` と同じ URI）、`AuthorizationServers`（認可サーバーの Issuer）、`Verifier` を渡す。`MetadataHandler` を `MetadataPath()`（RFC 9728 の `/.well-known/oauth-protected-resource[/{path}]`）に mount し、保護したいルートを `Protect(handler, 必要な scope...)` で包む。
   - `Verifier` は `IntrospectionVerifier`（Opaque / JWT 両方。Machine Profile の資格情報で `/introspect` を呼ぶ。失効が即時に伝わる）か `JWTVerifier`（JWT のみ。認可サーバーのメタデータから `jwks_uri` を得てローカル検証。失効は `exp` まで伝わらない）。どちらでも、ミドルウェアはトークンの `aud` に自分の resource が含まれることを必ず確認する。これを無効にする設定はない。
   - 未提示・無効なトークンは 401、scope 不足は 403 で、`WWW-Authenticate` に `resource_metadata` と必要な scope を載せる（MCP クライアントはこれを見て認可サーバーを見つけ、足りない scope を要求し直す）。検証方式の障害（認可サーバーに到達できない）は 503。
