@@ -10,11 +10,17 @@
 //
 // 初回起動時にデモ用クライアント demo-cli（Native、loopback redirect）を登録する。
 // cmd/cli-client がこのクライアントでフローを実行できる。
+//
+// MCP 連携（M3）: -resources で Resource Server（MCP サーバー）を静的に登録し、CIMD（URL 形式の
+// client_id）は既定で有効。文書をローカルの cmd/cimd-host から取るときは -cimd-allow-loopback と
+// -cimd-ca を付ける。
 package main
 
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -25,16 +31,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	authengine "github.com/u-masato/auth-engine"
 	"github.com/u-masato/auth-engine/adapters/sqlite"
+	"github.com/u-masato/auth-engine/cimd"
 	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/examples/standalone/console"
 	"github.com/u-masato/auth-engine/examples/standalone/loginapp"
 	"github.com/u-masato/auth-engine/httpapi"
 	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/resource"
 	"github.com/u-masato/auth-engine/storage"
 )
 
@@ -52,6 +61,10 @@ func main() {
 		insecureIssuer  = flag.Bool("allow-insecure-issuer", false, "allow an http issuer other than localhost (e.g. http://host.docker.internal:8080; local development only)")
 		consoleAddr     = flag.String("console-addr", "127.0.0.1:8083", "listen address for the developer console (empty to disable; it writes to the store without authentication, so keep it on loopback)")
 		consoleURL      = flag.String("console-url", "http://127.0.0.1:8083", "public URL of the developer console (its redirect URI is this + /callback)")
+		resourcesPath   = flag.String("resources", "", "JSON file of resource servers (RFC 8707 resource indicators; see resources.json)")
+		cimdEnabled     = flag.Bool("cimd", true, "resolve URL client_ids with Client ID Metadata Documents (MCP clients without registration)")
+		cimdLoopback    = flag.Bool("cimd-allow-loopback", false, "allow fetching metadata documents from loopback addresses (local development only; e.g. cmd/cimd-host)")
+		cimdCA          = flag.String("cimd-ca", "", "PEM file of additional CA / self-signed certificates to trust when fetching metadata documents (e.g. cimd-host's cimd-cert.pem)")
 	)
 	flag.Parse()
 
@@ -59,7 +72,8 @@ func main() {
 	if err := run(context.Background(), logger, options{
 		dbPath: *dbPath, keysPath: *keysPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
 		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove, clientsPath: *clientsPath, insecureIssuer: *insecureIssuer,
-		consoleAddr: *consoleAddr, consoleURL: *consoleURL,
+		consoleAddr: *consoleAddr, consoleURL: *consoleURL, resourcesPath: *resourcesPath,
+		cimd: *cimdEnabled, cimdLoopback: *cimdLoopback, cimdCA: *cimdCA,
 	}); err != nil {
 		logger.Error("server exited", "error", err)
 		os.Exit(1)
@@ -68,7 +82,8 @@ func main() {
 
 type options struct {
 	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL, clientsPath, consoleAddr, consoleURL string
-	autoApprove, insecureIssuer                                                                                      bool
+	resourcesPath, cimdCA                                                                                            string
+	autoApprove, insecureIssuer, cimd, cimdLoopback                                                                  bool
 }
 
 func run(ctx context.Context, logger *slog.Logger, o options) error {
@@ -85,7 +100,16 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	if err != nil {
 		return err
 	}
-	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Keys: keySet, Logger: logger, AllowInsecureIssuer: o.insecureIssuer})
+	resources, err := loadResources(o.resourcesPath, logger)
+	if err != nil {
+		return err
+	}
+	cimdCfg, err := cimdConfig(o, logger)
+	if err != nil {
+		return err
+	}
+	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Keys: keySet, Logger: logger, AllowInsecureIssuer: o.insecureIssuer,
+		Resources: resources, CIMD: cimdCfg})
 	if err != nil {
 		return err
 	}
@@ -153,7 +177,8 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 			}
 		}(s, ln)
 	}
-	logger.Info("ready", "issuer", o.issuer, "login_url", o.loginURL, "console_url", o.consoleURL, "auto_approve", o.autoApprove)
+	logger.Info("ready", "issuer", o.issuer, "login_url", o.loginURL, "console_url", o.consoleURL, "auto_approve", o.autoApprove,
+		"resources", len(resources), "cimd", cimdCfg != nil)
 
 	select {
 	case <-ctx.Done():
@@ -196,11 +221,13 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 // clientSpec は -clients で読むクライアント定義。
 type clientSpec struct {
 	ClientID               string   `json:"client_id"`
-	Profile                string   `json:"profile"` // web | native | machine
+	Profile                string   `json:"profile"` // web | native | machine | mcp
 	Name                   string   `json:"name"`
 	RedirectURIs           []string `json:"redirect_uris"`
 	Scopes                 []string `json:"scopes"`
-	Secret                 string   `json:"secret"` // web / machine。空なら生成してログに出す
+	Resources              []string `json:"resources"`  // 要求できる resource の上限（RFC 8707）。空なら設定済みの全部
+	Secret                 string   `json:"secret"`     // web / machine。空なら生成してログに出す
+	ClientURI              string   `json:"client_uri"` // mcp（CIMD 文書の client_uri）
 	IDTokenAlg             string   `json:"id_token_alg"`
 	AllowInsecureLocalhost bool     `json:"allow_insecure_localhost"`
 }
@@ -233,12 +260,17 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 		switch client.Profile(sp.Profile) {
 		case client.ProfileWeb:
 			c, secret, err = client.NewWeb(client.WebParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, RedirectURIs: sp.RedirectURIs,
-				Scopes: sp.Scopes, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
+				Scopes: sp.Scopes, Resources: sp.Resources, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
 		case client.ProfileNative:
 			c, err = client.NewNative(client.NativeParams{ID: sp.ClientID, Name: sp.Name, RedirectURIs: sp.RedirectURIs,
-				Scopes: sp.Scopes, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
+				Scopes: sp.Scopes, Resources: sp.Resources, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
 		case client.ProfileMachine:
-			c, secret, err = client.NewMachine(client.MachineParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, Scopes: sp.Scopes}, now)
+			c, secret, err = client.NewMachine(client.MachineParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, Scopes: sp.Scopes, Resources: sp.Resources}, now)
+		case client.ProfileMCP:
+			// URL 形式の client_id を事前登録する経路（CIMD §7）。文書は取得せず、ここに書いた内容が登録情報になる。
+			// Store にあるものが CIMD より優先される（client.ChainResolver）。
+			c, err = client.NewMCP(client.MetadataDocument{ClientID: sp.ClientID, ClientName: sp.Name, ClientURI: sp.ClientURI,
+				RedirectURIs: sp.RedirectURIs, Scope: strings.Join(sp.Scopes, " ")}, sp.ClientID, now)
 		default:
 			return nil, fmt.Errorf("client %s: unknown profile %q", sp.ClientID, sp.Profile)
 		}
@@ -256,6 +288,64 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 		known = append(known, console.KnownClient{ID: c.ID, Secret: string(secret)})
 	}
 	return known, nil
+}
+
+// resourceSpec は -resources で読む Resource Server の定義（resource.Resource と同じ項目）。
+type resourceSpec struct {
+	URI               string   `json:"uri"`
+	Name              string   `json:"name"`
+	AccessTokenFormat string   `json:"access_token_format"` // opaque（既定）| jwt
+	AccessTokenAlg    string   `json:"access_token_alg"`    // jwt のとき RS256（既定）| ES256
+	Scopes            []string `json:"scopes"`              // この resource 向けトークンに付けられる scope の上限。空なら制限なし
+}
+
+// loadResources は -resources の JSON を Config.Resources に写す。検証は Engine が行う。
+func loadResources(path string, logger *slog.Logger) ([]resource.Resource, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read resources %s: %w", path, err)
+	}
+	var specs []resourceSpec
+	if err := json.Unmarshal(data, &specs); err != nil {
+		return nil, fmt.Errorf("parse resources %s: %w", path, err)
+	}
+	out := make([]resource.Resource, 0, len(specs))
+	for _, sp := range specs {
+		r := resource.Resource{URI: sp.URI, Name: sp.Name, AccessTokenFormat: resource.Format(sp.AccessTokenFormat), AccessTokenAlg: sp.AccessTokenAlg, Scopes: sp.Scopes}
+		out = append(out, r)
+		logger.Info("configured resource", "uri", r.URI, "format", r.EffectiveFormat(), "alg", r.EffectiveAlg(), "scopes", r.Scopes)
+	}
+	return out, nil
+}
+
+// cimdConfig は CIMD の設定を組む。-cimd-ca があれば、その証明書を信頼する TLS 設定を cimd.NewTransport に
+// 足した HTTP クライアントを渡す（接続先アドレスの検査は Transport の責務なので NewTransport を基にする）。
+func cimdConfig(o options, logger *slog.Logger) (*cimd.Config, error) {
+	if !o.cimd {
+		return nil, nil
+	}
+	cfg := &cimd.Config{AllowLoopback: o.cimdLoopback}
+	if o.cimdCA != "" {
+		pemData, err := os.ReadFile(o.cimdCA)
+		if err != nil {
+			return nil, fmt.Errorf("read cimd ca %s: %w", o.cimdCA, err)
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pemData) {
+			return nil, fmt.Errorf("cimd ca %s: no certificates found", o.cimdCA)
+		}
+		tr := cimd.NewTransport(o.cimdLoopback)
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+		cfg.HTTPClient = &http.Client{Transport: tr, Timeout: cimd.DefaultTimeout}
+		logger.Info("trusting additional certificates for metadata documents", "path", o.cimdCA)
+	}
+	return cfg, nil
 }
 
 // loadOrCreateKeys は鍵セットをファイルから読み、なければ RS256 と ES256 の鍵を生成して保存する。

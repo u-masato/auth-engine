@@ -1,0 +1,8 @@
+[
+  {
+    "uri": "http://localhost:8090/mcp",
+    "name": "Demo MCP Server",
+    "access_token_format": "jwt",
+    "scopes": ["mcp:read", "mcp:write"]
+  }
+]

@@ -21,7 +21,9 @@ import (
 	"html/template"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -89,13 +91,18 @@ type Transaction struct {
 	Client struct {
 		ClientID string `json:"client_id"`
 		Name     string `json:"name"`
-		Profile  string `json:"profile"`
+		Profile  string `json:"profile"` // web | native | machine | mcp
+		// ClientURI は CIMD 文書の client_uri（mcp のみ）。エンジンは到達性を確認しないので、画面では文字列として出す。
+		ClientURI string `json:"client_uri"`
 	} `json:"client"`
 	Request struct {
-		Scopes    []string `json:"scopes"`
-		LoginHint string   `json:"login_hint"`
-		Prompt    []string `json:"prompt"`
-		MaxAge    *int64   `json:"max_age"`
+		// RedirectURI は認可後にブラウザが送られる先。MCP 仕様（CIMD Security）はホスト名の表示を MUST とする。
+		RedirectURI string   `json:"redirect_uri"`
+		Scopes      []string `json:"scopes"`
+		Resource    []string `json:"resource"`
+		LoginHint   string   `json:"login_hint"`
+		Prompt      []string `json:"prompt"`
+		MaxAge      *int64   `json:"max_age"`
 	} `json:"request"`
 }
 
@@ -191,15 +198,19 @@ func (a *App) Reject(ctx context.Context, id, code, description string) (string,
 
 var page = template.Must(template.New("login").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Sign in</title>
-<style>body{font-family:system-ui;max-width:28rem;margin:3rem auto;padding:0 1rem}label{display:block;margin:.5rem 0}</style></head>
+<style>body{font-family:system-ui;max-width:28rem;margin:3rem auto;padding:0 1rem}label{display:block;margin:.5rem 0}.mcp{border-left:3px solid #c60;padding-left:.75rem}</style></head>
 <body>
 <h1>Sign in to {{.Txn.Client.Name}}</h1>
-<p><small>client_id: <code>{{.Txn.Client.ClientID}}</code> ({{.Txn.Client.Profile}})</small></p>
+{{if .MCP}}<p class="mcp"><strong>{{.Txn.Client.Name}}</strong> is an MCP client published at <strong>{{.ClientHost}}</strong>. It is not registered with this service; its name comes from its own metadata document.<br>
+<small>client_id: <code>{{.Txn.Client.ClientID}}</code>{{if .Txn.Client.ClientURI}} &middot; website: <code>{{.Txn.Client.ClientURI}}</code>{{end}}</small></p>
+{{else}}<p><small>client_id: <code>{{.Txn.Client.ClientID}}</code> ({{.Txn.Client.Profile}})</small></p>{{end}}
+{{if .RedirectHost}}<p>After you approve, your browser will be sent to <strong>{{.RedirectHost}}</strong>.{{if .RedirectIsLocal}} That is an application running on this computer. Continue only if you started this request yourself.{{end}}</p>{{end}}
 <form method="post" action="/login">
   <input type="hidden" name="txn" value="{{.Txn.ID}}">
   <label>Username <input name="username" value="{{.Txn.Request.LoginHint}}" required autofocus></label>
   <p>{{.Txn.Client.Name}} is requesting:</p>
   {{range .Txn.Request.Scopes}}<label><input type="checkbox" name="scope" value="{{.}}" checked> {{.}}</label>{{end}}
+  {{if .Txn.Request.Resource}}<p><small>The access token will be valid only for: {{range .Txn.Request.Resource}}<code>{{.}}</code> {{end}}</small></p>{{end}}
   <p><button name="action" value="approve">Approve</button> <button name="action" value="deny">Deny</button></p>
 </form>
 <p><small>Demo Interaction App. No password is checked.</small></p>
@@ -238,7 +249,51 @@ func (a *App) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = page.Execute(w, struct{ Txn *Transaction }{txn})
+	_ = page.Execute(w, newPageView(txn))
+}
+
+// pageView は同意画面に渡す値。MCP Client（CIMD）では client_id と redirect URI のホスト名を名前と並べて出す
+// （MCP 仕様 CIMD Security「Localhost Redirect URI Risks」の MUST。docs/interaction-api.md「profile が mcp のとき」）。
+// redirect URI のホスト名はどの Profile でも出す。
+type pageView struct {
+	Txn *Transaction
+	// MCP は Profile が mcp のとき true。ClientHost は client_id URL のホスト。
+	MCP        bool
+	ClientHost string
+	// RedirectHost は redirect URI のホスト（ポート付き）。RedirectIsLocal は localhost / loopback のとき true（注意書きを出す）。
+	RedirectHost    string
+	RedirectIsLocal bool
+}
+
+func newPageView(txn *Transaction) pageView {
+	v := pageView{Txn: txn, MCP: txn.Client.Profile == "mcp"}
+	if v.MCP {
+		v.ClientHost = hostOf(txn.Client.ClientID)
+	}
+	if u, err := url.Parse(txn.Request.RedirectURI); err == nil && u.Host != "" {
+		v.RedirectHost = u.Host
+		v.RedirectIsLocal = isLocalHost(u.Hostname())
+	} else if txn.Request.RedirectURI != "" {
+		v.RedirectHost = txn.Request.RedirectURI // カスタムスキーム（myapp:/callback）はそのまま出す
+	}
+	return v
+}
+
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
+}
+
+// isLocalHost は localhost と loopback アドレス（127.0.0.0/8、::1）を判定する。
+func isLocalHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (a *App) handlePost(w http.ResponseWriter, r *http.Request) {
