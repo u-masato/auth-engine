@@ -151,6 +151,8 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
 
 `client_id` が不明、`redirect_uri` が不一致など、Client へリダイレクトしてはいけないエラーのときは、エンジンがブラウザにエラーページを返す。既定の `PlainErrorRenderer` は装飾のない HTML なので、自社のデザインにしたいときは `ErrorRenderer` を実装して差し替える。例は [`ExampleErrorRenderer`](../httpapi/example_test.go)。
 
+`ErrorRenderer` を使うのはブラウザが開くエンドポイント（`/authorize` と Resume）だけである。Client や Resource Server が呼ぶ `/token` `/revoke` `/introspect` `/userinfo` `/jwks` と Interaction API の内部障害（500）は、JSON の `{"error":"server_error",...}` で返し、`ErrorRenderer` を通さない。
+
 ### `http.Server` の設定
 
 エンジンは `http.Handler` を返すだけで、リスナーとタイムアウトは利用者が持つ。少なくとも `ReadHeaderTimeout` を設定する（Slowloris 対策）。レート制限・WAF・ヘルスチェック用のエンドポイントもエンジンには含まれないので、前段か外側の Handler で用意する。
