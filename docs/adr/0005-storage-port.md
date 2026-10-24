@@ -42,7 +42,7 @@ SQLite 側の前提:
 
 | 操作 | 備考 |
 | --- | --- |
-| `GetClient(ctx, clientID)` | P1 で `ClientResolver` の 1 実装になる |
+| `GetClient(ctx, clientID)` | `client.Resolver` の 1 実装。M3 で `client.ChainResolver{Store, cimd.Resolver}` に合成し、Store にない URL 形式の `client_id` は CIMD で解決する（ADR-0008 §5） |
 | `CreateTransaction(ctx, txn)` / `GetTransaction(ctx, id)` | Txn 本体 |
 | `CreateAuthorizationCode(ctx, code)` | Resume 時 |
 | `UpsertGrant(ctx, clientID, subject, scopes, claims)` | 同意結果の保存。既存 Grant があれば scope を和集合で更新 |

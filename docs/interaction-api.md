@@ -1,6 +1,6 @@
 # Interaction API 仕様（Interaction App 実装者向け）
 
-- 対象バージョン: M3 タスク 5（2026-10-25）。M2 からの契約変更: `client.profile` に `mcp` を追加、`client.client_uri` と `request.redirect_uri` を追加（[ADR-0008](adr/0008-mcp-integration.md) §6）
+- 対象バージョン: M3（2026-10-25）。M2 からの契約変更: `client.profile` に `mcp` を追加、`client.client_uri` と `request.redirect_uri` を追加（[ADR-0008](adr/0008-mcp-integration.md) §6）
 - 設計の背景: [ADR-0003 Interaction App との契約](adr/0003-interaction-contract.md)
 - 参考実装: [examples/standalone/loginapp](../examples/standalone/loginapp/loginapp.go)
 

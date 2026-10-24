@@ -56,24 +56,25 @@ OIDC の仕様は OpenID Foundation が発行しており、RFC 番号はない�
 | [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518.html) | JSON Web Algorithms（JWA） |
 | [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519.html) | JSON Web Token（JWT） |
 | [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725.html) | JWT Best Current Practices |
-| [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068.html) | JWT 形式の Access Token（採用する場合のみ） |
+| [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068.html) | JWT 形式の Access Token（M3 で追加。resource ごとに選ぶ、ADR-0008 §3） |
 
 - 暗号プリミティブは自作せず、検証済みのライブラリを使う（go-jose v4、ADR-0002）。
 - JWT Access Token は必須ではない。Access Token は Opaque を既定とする（ADR-0006）。
 
 ## P1. MCP 連携
 
-基準は [MCP Authorization Specification（2026-07-28）](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)。
+基準は [MCP Authorization Specification（2026-07-28）](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)。**M3（2026-10-25 完了）で実装した。** 設計は [ADR-0008](adr/0008-mcp-integration.md)、相互運用の結果は [mcp-interop.md](mcp-interop.md)。
 
-| 仕様 | 実装対象 | 優先度 |
-| --- | --- | --- |
-| [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707.html) | Resource Indicators。Access Token の利用対象を指定する | 必須 |
-| [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728.html) | Protected Resource Metadata。MCP サーバーが認可情報を公開する | MCP 連携には必須 |
-| [CIMD（Internet-Draft）](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/) | Client ID Metadata Document によるクライアント識別 | 強く推奨 |
-| [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591.html) | Dynamic Client Registration（DCR） | 互換性目的 |
-| [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) | CLI・デスクトップなど Native App の OAuth | 推奨 |
+| 仕様 | 実装対象 | 優先度 | 状態（M3） |
+| --- | --- | --- | --- |
+| [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707.html) | Resource Indicators。Access Token の利用対象を指定する | 必須 | 実装済み。認可要求・トークン要求の `resource`、`Config.Resources` にない値は `invalid_target`、Introspection の `aud` |
+| [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728.html) | Protected Resource Metadata。MCP サーバーが認可情報を公開する | MCP 連携には必須 | 実装済み（`resourceserver` パッケージ。メタデータと `WWW-Authenticate` の `resource_metadata`） |
+| [CIMD（Internet-Draft）](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/) | Client ID Metadata Document によるクライアント識別 | 強く推奨 | 実装済み（draft-02。`cimd` パッケージ、MCP Client Profile。`private_key_jwt` の CIMD Client は M4） |
+| [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591.html) | Dynamic Client Registration（DCR） | 互換性目的 | **実装しない**（ADR-0008 §8。`registration_endpoint` を出さない） |
+| [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) | CLI・デスクトップなど Native App の OAuth | 推奨 | 実装済み（Native Profile の loopback 照合。MCP Profile は加えて `http://localhost` を許可） |
+| [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068.html) | JWT 形式の Access Token（ローカル検証したい MCP サーバー向け） | 任意 | 実装済み（resource ごとに Opaque / JWT を選ぶ。既定は Opaque） |
 
-MCP の 2026-07-28 版では CIMD が推奨で、DCR は後方互換のために残る非推奨方式である。Resource Indicators と Audience 検証が重要な要件になる。
+MCP の 2026-07-28 版では CIMD が推奨で、DCR は後方互換のために残る非推奨方式である。Resource Indicators と Audience 検証が重要な要件になる。MCP Inspector（公式クライアント）は `client_id_metadata_document_supported: true` を見て CIMD を使い、DCR を試みなかった（mcp-interop.md）。
 
 ### 責務の分担
 
@@ -158,4 +159,4 @@ RFC 単位でコードを足すのではなく、ドメインの責務を段階�
 | Security | PKCE Downgrade、Code Replay、Refresh Token Replay、Redirect URI 不一致、署名アルゴリズム混同 |
 | Concurrency | 認可コードの同時交換、Refresh Token Rotation の競合、Grant 失効とトークン発行の競合 |
 
-外部検証には [OpenID Foundation Conformance Suite](https://gitlab.com/openid/conformance-suite) を使う（手順は [conformance.md](conformance.md)）。MCP については、公式仕様に対する相互運用テストを別に用意する。
+外部検証には [OpenID Foundation Conformance Suite](https://gitlab.com/openid/conformance-suite) を使う（手順は [conformance.md](conformance.md)）。MCP については、公式クライアント MCP Inspector との相互運用（CIMD + PKCE + `resource` の完全フロー）を手動で確認し、手順と結果を [mcp-interop.md](mcp-interop.md) に記録している。CI で回す E2E は `tests/mcp_test.go`。

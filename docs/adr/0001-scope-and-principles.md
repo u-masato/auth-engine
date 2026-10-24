@@ -38,7 +38,7 @@
 - Implicit Grant、Resource Owner Password Credentials Grant、Hybrid Flow（RFC 9700 §2.1.2, §2.4）
 - PKCE を使わない Authorization Code Grant（RFC 9700 §2.1.1）
 - `plain` の `code_challenge_method`
-- Dynamic Client Registration（P1 で CIMD と併せて検討）
+- Dynamic Client Registration（P1 で CIMD と併せて検討 → M3 で実装しないと決定。CIMD が「事前関係なし」の場面を満たす。[ADR-0008](0008-mcp-integration.md) §8）
 - 管理 GUI、マルチテナント、独自プラグイン実行環境
 - 任意トークンの Mint / Reissue（ADR-0006 で却下理由を記述）
 

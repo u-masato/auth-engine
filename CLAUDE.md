@@ -7,6 +7,7 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 - [docs/README.md](docs/README.md) — 設計判断の索引。**設計を変えるときは必ず ADR を追記・修正する**
 - [docs/adr/0003-interaction-contract.md](docs/adr/0003-interaction-contract.md) — ヘッドレス契約（最重要）
 - [docs/adr/0005-storage-port.md](docs/adr/0005-storage-port.md) / [0007-package-layout.md](docs/adr/0007-package-layout.md) — Store の契約と依存の向き
+- [docs/adr/0008-mcp-integration.md](docs/adr/0008-mcp-integration.md) — MCP 連携（`resource` `cimd` `resourceserver`、JWT Access Token）。末尾の「実装結果」に計画からの差分
 - [docs/roadmap.md](docs/roadmap.md) — マイルストーンとタスク順序。作業はここの番号に沿って進める
 - [docs/interaction-api.md](docs/interaction-api.md) — Interaction App 向け公開仕様。HTTP の形を変えたらここも直す
 - [docs/embedding.md](docs/embedding.md) — 組み込む人向けの手順。`Config` や公開 API を変えたら、ここと各パッケージの `example_test.go` も直す
@@ -15,7 +16,7 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 
 | モジュール | 役割 | 外部依存 |
 | --- | --- | --- |
-| `.`（`github.com/u-masato/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
+| `.`（`github.com/u-masato/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` `resource` `cimd` と、配線の入口 `Engine`。Resource Server 側の `resourceserver` も同じモジュール（`Engine` に依存しない） | go-jose/v4 のみ |
 | `adapters/sqlite` | SQLite Store Adapter（modernc.org/sqlite、goose ライブラリ） | — |
 | `adapters/postgres` | PostgreSQL Store Adapter（pgx/v5、goose）。契約テストは Testcontainers（Docker がなければ Skip、`AUTH_ENGINE_POSTGRES_DSN` で既存 DB も可） | — |
 | `examples/standalone` | デモサーバー、デモ Interaction App（`loginapp`）、サンプルクライアント（`oauthclient`）、開発者コンソール（`console`。Client 登録とフローの手動確認、`127.0.0.1:8083`） | `console` の RP 側 ID Token 検証に go-jose |
@@ -44,7 +45,7 @@ go test -race ./authorization/            # 1 パッケージ
 - Store インターフェースは**使う側の文脈パッケージ**で定義し、ルート `authengine.Store` で合成する。`storage` はセンチネルエラーだけの葉パッケージ。
 - Store の各メソッドは単体で原子的。Port に `BeginTx` を置かない。競合は `ConsumeAuthorizationCode` `RotateRefreshToken` `IssueTokens` `RevokeGrant` のような意図を表す 1 メソッドで解く。全 Adapter は `storage/storagetest` を通す。
 - 全 Port メソッドの第一引数は `context.Context`。`ctx` に値を載せて挙動を変えない。
-- Client Profile（Web / Native / Machine）で grant_type・PKCE・認証方式・redirect 照合を固定する。個別フラグの開放や Custom Profile は作らない。PKCE なし、`plain`、Implicit、Password Grant は実装しない。
+- Client Profile（Web / Native / Machine / MCP）で grant_type・PKCE・認証方式・redirect 照合を固定する。個別フラグの開放や Custom Profile は作らない。PKCE なし、`plain`、Implicit、Password Grant、Dynamic Client Registration は実装しない。
 - 秘密値（Code、トークン、Resume Token、Client Secret）は 256 bit 乱数で、保存は SHA-256 ハッシュのみ。比較は定数時間（`internal/rand`）。
 - 状態遷移は fail-closed。Resume は CAS で `consumed` にしてから Code を作る。Code 交換は先に消費し、検証失敗でも戻さない。
 - Code 再利用の検知で失効させるのは Token Family（Grant ではない）。

@@ -1,7 +1,7 @@
 # ADR-0006: トークン形式と Token Operations
 
-- 状態: 採用（2026-10-24 合意）
-- 日付: 2026-10-24
+- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で JWT Access Token と Audience を追加（[ADR-0008](0008-mcp-integration.md) §3）
+- 日付: 2026-10-24（2026-10-25 更新）
 
 ## 文脈
 
@@ -21,7 +21,15 @@
 帰結:
 
 - Resource Server はトークン検証に **Introspection（RFC 7662）を使う**。したがって Introspection は「推奨」ではなく **P0 の後半（M2）で必須** とする。同一プロセスの Resource Server 向けには Go API `Inspect` を直接呼べるようにする。
-- MCP 等で Resource Server がローカル検証を望む場合に備え、**JWT Access Token（RFC 9068）は Token Policy の選択肢** として P1 で追加する。発行経路を `TokenIssuer` インターフェースの背後に置き、P0 では Opaque 実装のみを持つ。
+- MCP 等で Resource Server がローカル検証を望む場合に備え、**JWT Access Token（RFC 9068）を選択肢** として P1 で追加する。発行経路を `token.Issuer` インターフェースの背後に置き、P0 では Opaque 実装のみを持つ。
+
+M3（2026-10-25）で JWT Access Token を次の形で追加した（ADR-0008 §3）。Opaque が既定であることは変わらない。
+
+- **形式は Client ではなく resource ごとに決める。** `Config.Resources` の `AccessTokenFormat`（Opaque / JWT）と `AccessTokenAlg`（RS256 / ES256）で選ぶ。形式は Resource Server がローカル検証するか Introspection するかの都合であり、Client の属性ではない。`resource` なしの要求は常に Opaque。複数 `resource` で形式が揃わない要求は `invalid_target`。
+- `token.Issuer` の実装は `OpaqueIssuer`、`JWTIssuer`、形式で振り分ける `ByFormat` の 3 つ。`Engine` は `ByFormat` を配線し、`token.Service` が Audience 先頭の resource 設定で形式を決める。
+- JWT は RFC 9068: `typ: at+jwt`、`iss` `sub` `aud`（常に配列）`exp` `iat` `jti` `client_id` `scope`、認可コード由来なら `auth_time` `acr` `amr`。署名は `keys` の署名鍵。
+- **JWT でも Store に `AccessToken` の行を持つ**（`Hash` はトークン文字列全体の SHA-256）。Introspection と Revocation は形式に依らず同じ経路で動く。ただし Resource Server がローカル検証する限り失効は `exp` まで伝播しない。これは上の「Opaque を既定とする理由」そのものであり、JWT を選ぶ resource には短い `AccessTokenTTL` の Client を組み合わせることを文書で求める。
+- **Audience。** 認可要求の `resource`（RFC 8707）は `Family.Audience` として引き継ぎ、トークン要求の `resource` でその部分集合に絞った値を `AccessToken.Audience` に付ける。Introspection 応答に `aud` を載せ（RFC 7662 §2.2）、Resource Server は形式に依らず `aud` に自分が含まれることを確認する。UserInfo は AS 自身のリソースなので `openid` scope があれば `aud` に関わらず受理する。
 
 形式: `at_` などの短い接頭辞 + 256 bit 乱数の base64url。接頭辞はログやシークレットスキャナでの識別用。保存は SHA-256 ハッシュのみ（ADR-0005）。
 
@@ -71,5 +79,5 @@ Txn が消費された後も `/userinfo` は Claims を返す必要がある。�
 
 ## 影響
 
-- `token` パッケージは `TokenIssuer`（Opaque）と `IDTokenSigner` を持ち、`TokenFamily` を集約として管理する。
+- `token` パッケージは `Issuer`（`OpaqueIssuer` / `JWTIssuer` / `ByFormat`）を持ち、`Family` を集約として管理する。ID Token の組立と署名は `oidc` パッケージ。
 - Introspection・Revocation エンドポイントを M2 に前倒しする（ロードマップ参照）。

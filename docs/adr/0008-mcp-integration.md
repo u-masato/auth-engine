@@ -1,7 +1,7 @@
 # ADR-0008: MCP 連携（Resource Indicators、MCP Client Profile、CIMD、JWT Access Token、Resource Server ミドルウェア）
 
-- 状態: 採用（2026-10-24 合意）
-- 日付: 2026-10-24
+- 状態: 採用（2026-10-24 合意）。**実装済み（2026-10-25、M3 タスク 1〜8）**。計画からの差分は末尾の「実装結果」に記す
+- 日付: 2026-10-24（2026-10-25 更新）
 
 ## 文脈
 
@@ -24,6 +24,7 @@ authengine.Config{
         URI:               "https://mcp.example.com",
         Name:              "Example MCP Server",
         AccessTokenFormat: resource.FormatJWT, // 既定は FormatOpaque
+        AccessTokenAlg:    "ES256",            // FormatJWT のときだけ。既定は RS256（RFC 9068 §4）
         Scopes:            []string{"files:read", "files:write"},
     }},
 }
@@ -32,7 +33,7 @@ authengine.Config{
 - Resource Server はデプロイ単位で決まり、Client のように実行時に増えない。Store と migration を増やさず、Client と同じ「構造体で渡す」方針（ADR-0002）に揃える。
 - `resource.Resource.URI` は RFC 8707 §2 の resource indicator: 絶対 URI、fragment なし、query は持たないことを推奨。比較は scheme と host を小文字化した上での文字列一致（MCP 仕様「Canonical Server URI」が大文字の受理を SHOULD とするため）。末尾スラッシュの有無は区別する。
 - 要求された `resource` が設定にないものは `invalid_target`（RFC 8707 §2）。認可要求では「リダイレクトしてよいエラー」（Client と redirect URI の検証後に判定するため）。
-- `Scopes` は省略可。指定があれば、その resource 向けのトークンに付く scope はこの範囲に限る（範囲外は `invalid_scope`）。
+- `Scopes` は省略可。指定があれば、その resource 向けのトークンに付く scope はこの範囲に限る（範囲外は `invalid_scope`）。ただし OIDC の標準 scope（`openid` `profile` `email` `address` `phone` `offline_access`）は認可サーバー自身（ID Token、UserInfo、Refresh Token）に向けたものなので制限を受けない。これがないと MCP クライアントが `openid` と resource 向け scope を同時に要求できない。複数 `resource` ではいずれかの resource が許せばよい（各 Resource Server は関係ない scope を無視する）。
 - 複数インスタンス構成で設定が食い違う運用事故は、Store に置いても防げない（設定の配布の問題）。必要になれば `resource.Store` を足す。
 
 ### 2. 登録済み Client の `resource` 制限
@@ -195,11 +196,31 @@ Grant は `client_id` 文字列をキーにするので、CIMD Client の同意�
 | ADR-0007 §1, §4 | コアに `resource` `cimd` `resourceserver` パッケージを追加。`client.Resolver` を Chain で合成、`token.Issuer` を Opaque / JWT の 2 実装で実体化 |
 | ADR-0003 | 変更なし。Interaction API のフィールド追加は `docs/interaction-api.md` に反映する（§6） |
 
-各 ADR への追記は M3 タスク 9 で行う。それまでは本 ADR が優先する。
+各 ADR への追記は M3 タスク 9（2026-10-25）で行った。記述が食い違う場合は本 ADR が優先する。
 
 ## 影響
 
-- Access Token の記録に `Audience` が増え、Code と Client にも列が増える（SQLite migration `00003`、PostgreSQL migration `00002`）。`storagetest` に `resource` の引き継ぎを加える。
+- Access Token の記録に `Audience` が増え、Code と Client にも列が増える（SQLite migration `00003`〜`00005`、PostgreSQL migration `00002`〜`00004`。タスクごとに 1 本ずつ追加した）。`storagetest` に `resource` の引き継ぎを加える。
 - `resource` を送ってきた既存 Client の挙動が変わる: M1 / M2 では黙って受理していたが、M3 からは設定にない `resource` は `invalid_target` になる。`Config.Resources` が空の構成では `resource` 付きの要求がすべて失敗する。これは意図したフェイルクローズで、README に書く。
 - コアが net/http クライアントとして外部に接続する箇所が初めてできる（`cimd`）。SSRF 対策は `cimd` に閉じ、テストで特殊用途アドレスの拒否を網羅する。
-- `resourceserver` は認可サーバーではなく Resource Server 側で動くコードなので、`httpapi` と混ぜない。`Engine` を import しないことを `scripts/check-core-deps.sh` と同様の検査で守るか、レビューで守る。
+- `resourceserver` は認可サーバーではなく Resource Server 側で動くコードなので、`httpapi` と混ぜない。`Engine` を import しないことを `scripts/check-core-deps.sh` で検査する。
+
+## 実装結果（2026-10-25）
+
+M3 タスク 1〜8 で本 ADR を実装した。経緯は [roadmap](../roadmap.md)「M3 の実施結果」、相互運用の結果は [mcp-interop.md](../mcp-interop.md)。計画から変えた点と、計画になかった判断を節ごとに記す。これらは本 ADR の決定の一部として読む。
+
+| 節 | 差分 |
+| --- | --- |
+| §1 | `resource.Normalize` は RFC 8707 §2 の「絶対 URI」をそのまま採り、`https` に限定しない（`urn:` も受理。host を持たない `scheme:` だけの値は拒否）。`Resource.AccessTokenAlg`（RS256 / ES256、既定 RS256）を追加し、`Engine.New` は JWT の resource に対応する署名鍵が `Keys` にあることを起動時に確認する。`Scopes` の制限は OIDC の標準 scope を除外する（§1 本文に追記） |
+| §2 | 計画どおり。fail-closed を 1 つ足した: 設定から外された resource を Code / Family が持っていると、`resource` 未指定でも `invalid_target` にする（設定変更後に古い Family で発行し続けない） |
+| §3 | `token.Issuer` の実装は `OpaqueIssuer` / `JWTIssuer` と、形式で振り分ける `ByFormat` の 3 つ。`JWTIssuer` は `oidc` ではなく `token` パッケージに置いた（Access Token は OAuth の概念。`token` → `keys` の依存は循環しない）。`keys` に `SignTyped`（`typ` ヘッダ）を追加。Introspection の `aud` は常に配列で、`resource` なしのトークンでは省略する |
+| §4 | `http://localhost` はポートまで完全一致。ポートを無視するのは loopback IP リテラル（RFC 8252 §7.3 の対象）だけ。CIMD 文書に `scope` がない MCP Client は scope の上限を持たない（`Client.Scopes` 空 = 制限なし。他 Profile では空は不正のまま）。`Client.ClientURI` を追加して Store にも保存する（URL 形式の `client_id` を事前登録する経路で値が落ちないようにする。SQLite migration `00005` / PostgreSQL `00004`）。MCP Client の `resource` 欠落は `invalid_request`（リダイレクト可） |
+| §5 | SSRF 対策は「接続前に名前解決」ではなく、`net.Dialer.Control` で解決後の接続先アドレスを検査する（解決と接続の間に隙間がない）。プロキシは使わない。`cimd.NewTransport` を基にしない `HTTPClient` を渡すとこの保護が外れることを文書で求める。キャッシュは `no-store` / `no-cache` も下限（1 分）で保持し、件数上限（既定 1000）を持つ。解決できない `client_id` は `client.ErrUnresolvable` で返し、認可要求では理由付きの `invalid_request`（リダイレクトしない）、トークン要求では `invalid_client` に写す。`client.ChainResolver`（Store → CIMD）はタスク 4 で `client` に置いた |
+| §6 | 計画どおり。Interaction API は `Store` ではなく `Engine.Clients`（Resolver）で Client を引く。デモの loginapp は redirect URI のホスト名を全 Profile で表示する（Native の loopback にも同じ注意書きが当てはまる） |
+| §7 | `IntrospectionVerifier` は応答の `token_type` が `Bearer` でない（省略を含む）トークンを拒否する（本エンジンの Refresh Token は `token_type` を持たないので Bearer として持ち込めない）。`JWTVerifier` は署名検証の前に `alg` を許可リスト（既定 RS256 / ES256）で落とし、JWKS は `Cache-Control` を [1 分, 24 時間] で尊重、未知の `kid` では `MinRefresh` を過ぎていれば再取得する。検証方式の障害（認可サーバーに到達できない）は 503。クエリやフォームの `access_token`（RFC 6750 §2.2、§2.3）は受け付けない。`keys.ImportJWKS` を追加 |
+| §8 | 計画どおり。`registration_endpoint` は出さない。MCP Inspector は `client_id_metadata_document_supported: true` を見て CIMD を使い、DCR を試みなかった |
+
+計画になかったもの:
+
+- デモ MCP サーバー（`examples/standalone/cmd/mcp-server`）に最小の MCP（Streamable HTTP の `initialize` / `ping` / `tools/list` / `tools/call`）を実装した。公式クライアントは認可後に `initialize` を送るので、接続まで確かめるには最小限が要る。コアには MCP プロトコルを置かない（§7 のとおり）。
+- CIMD の `client_id` は https 必須なので、ローカルの文書配信は自己署名証明書を使う `cmd/cimd-host` にし、`cmd/server` に `-cimd-ca` を足した。TLS 検証を外す選択肢は作らない。

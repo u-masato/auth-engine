@@ -216,6 +216,9 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
 - [ ] `http.Server` に `ReadHeaderTimeout` を設定し、前段にレート制限がある
 - [ ] `code.reuse`、`refresh.reuse`、`refresh.client_mismatch`、`http.internal_error` を監視している
 - [ ] Interaction App が [Interaction API 仕様](interaction-api.md) の「守ってほしいこと」を満たしている
+- [ ] `Config.Resources` に本番の Resource Server だけが載っている。JWT を選んだ resource には短い `AccessTokenTTL` の Client を組み合わせている
+- [ ] `Config.CIMD` を有効にするなら、`AllowLoopback` が false で、`HTTPClient` を差し替えている場合は `cimd.NewTransport` を基にしている。`TrustPolicy`（どのドメインの `client_id` を受け入れるか）を決めている
+- [ ] Resource Server が Access Token の `aud` に自分の resource URI が含まれることを確認している（`resourceserver` を使えば自動）
 
 ## 関連文書
 
