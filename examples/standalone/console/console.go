@@ -157,9 +157,8 @@ func (a *App) knownSecret(id string) string {
 var templateFS embed.FS
 
 var pages = template.Must(template.New("").Funcs(template.FuncMap{
-	"join":   strings.Join,
-	"native": func(p client.Profile) bool { return p == client.ProfileNative },
-	"inc":    func(i int) int { return i + 1 },
+	"join": strings.Join,
+	"inc":  func(i int) int { return i + 1 },
 }).ParseFS(templateFS, "console.html"))
 
 // clientView は一覧と詳細に出す Client の情報。Store から取れなかったものは Err に理由を入れる。
@@ -188,17 +187,10 @@ func (a *App) clientView(ctx context.Context, k KnownClient) clientView {
 }
 
 // redirectUsable は、コンソールの redirect URI でこの Client の認可要求が通るかを返す。
-// 照合そのものはエンジンが行う（client/redirect.go）。ここでは画面の案内に使うだけ。
+// 照合はエンジンと同じ規則（client.Client.ResolveRedirectURI。loopback のポート無視を含む）で行い、画面の案内に使う。
 func (a *App) redirectUsable(c *client.Client) bool {
-	cb := a.RedirectURI()
-	if slices.Contains(c.RedirectURIs, cb) {
-		return true
-	}
-	if c.Profile == client.ProfileNative && strings.HasPrefix(cb, "http://127.0.0.1:") {
-		// RFC 8252 §7.3: loopback はポートを無視して照合される
-		return slices.Contains(c.RedirectURIs, "http://127.0.0.1/callback")
-	}
-	return false
+	_, err := c.ResolveRedirectURI(a.RedirectURI())
+	return err == nil
 }
 
 type indexPage struct {

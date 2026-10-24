@@ -66,7 +66,7 @@ func (v *IntrospectionVerifier) Verify(ctx context.Context, token string) (*Prin
 	req.Header.Set("Accept", "application/json")
 	// RFC 6749 §2.3.1: Basic 認証の資格情報は form-urlencoded してから Base64 にする。
 	req.SetBasicAuth(url.QueryEscape(v.ClientID), url.QueryEscape(v.ClientSecret))
-	res, err := v.httpClient().Do(req)
+	res, err := httpClientOr(v.HTTPClient).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("resourceserver: introspection: %w", err)
 	}
@@ -110,7 +110,7 @@ func (v *IntrospectionVerifier) endpoint(ctx context.Context) (string, error) {
 		return "", errors.New("resourceserver: IntrospectionVerifier requires Issuer or Endpoint")
 	}
 	if v.as == nil {
-		v.as = newASClient(v.Issuer, v.httpClient())
+		v.as = newASClient(v.Issuer, httpClientOr(v.HTTPClient))
 	}
 	m, err := v.as.metadata(ctx)
 	if err != nil {
@@ -120,13 +120,6 @@ func (v *IntrospectionVerifier) endpoint(ctx context.Context) (string, error) {
 		return "", errors.New("resourceserver: authorization server metadata has no introspection_endpoint")
 	}
 	return m.IntrospectionEndpoint, nil
-}
-
-func (v *IntrospectionVerifier) httpClient() *http.Client {
-	if v.HTTPClient != nil {
-		return v.HTTPClient
-	}
-	return &http.Client{Timeout: 10 * time.Second}
 }
 
 // parseAudience は aud（文字列または配列。RFC 7519 §4.1.3）を配列にする。

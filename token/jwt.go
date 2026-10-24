@@ -60,12 +60,11 @@ func (j *JWTIssuer) Issue(_ context.Context, in IssueInput) (string, *AccessToke
 	if err != nil {
 		return "", nil, err
 	}
-	expires := in.Now.Add(in.Client.EffectiveAccessTokenTTL())
 	claims := jwtAccessClaims{
 		Issuer:    j.Issuer,
 		Subject:   in.Family.Subject,
 		Audience:  in.Audience,
-		ExpiresAt: expires.Unix(),
+		ExpiresAt: in.expiresAt().Unix(),
 		IssuedAt:  in.Now.Unix(),
 		JWTID:     jti,
 		ClientID:  in.Client.ID,

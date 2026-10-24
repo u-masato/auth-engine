@@ -61,13 +61,13 @@ func ParseClientIDURL(id string) (*url.URL, error) {
 		return nil, fmt.Errorf("%w: %v", ErrNotMetadataURL, err)
 	}
 	switch {
-	case u.Scheme != "https" || u.Hostname() == "":
+	case u.Hostname() == "": // scheme は上の接頭辞で https に決まっている
 		return nil, fmt.Errorf("%w: scheme must be https with a host", ErrNotMetadataURL)
 	case u.User != nil:
 		return nil, fmt.Errorf("%w: userinfo is not allowed", ErrNotMetadataURL)
-	case u.Path == "" || u.Opaque != "":
+	case u.Path == "":
 		return nil, fmt.Errorf("%w: a path component is required", ErrNotMetadataURL)
-	case u.Fragment != "" || strings.HasSuffix(id, "#"):
+	case strings.Contains(id, "#"): // 空の fragment（末尾の "#"）も拒否する
 		return nil, fmt.Errorf("%w: fragment is not allowed", ErrNotMetadataURL)
 	}
 	for seg := range strings.SplitSeq(u.EscapedPath(), "/") {
@@ -89,15 +89,18 @@ func NewMCP(doc MetadataDocument, documentURL string, now time.Time) (*Client, e
 	if doc.ClientID != documentURL {
 		return nil, fmt.Errorf("%w: client_id %q does not match the document url %q", ErrInvalid, doc.ClientID, documentURL)
 	}
-	// CIMD §4.1: 共有シークレットに基づく認証方式とシークレット自体を含む文書は拒否する。
-	if doc.TokenEndpointAuthMethod != "" && doc.TokenEndpointAuthMethod != string(AuthNone) {
+	// 文書の値は Profile 表の固定値と矛盾しないことだけを確認する（ADR-0004 §1）。
+	rules := ProfileMCP.rules()
+	// CIMD §4.1: 共有シークレットに基づく認証方式とシークレット自体を含む文書は拒否する
+	// （MCP Profile の認証方式は none だけ）。
+	if m := doc.TokenEndpointAuthMethod; m != "" && !slices.Contains(rules.authMethods, AuthMethod(m)) {
 		return nil, fmt.Errorf("%w: token_endpoint_auth_method %q is not supported for metadata document clients", ErrInvalid, doc.TokenEndpointAuthMethod)
 	}
 	if doc.ClientSecret != "" || len(doc.ClientSecretExpiresAt) != 0 {
 		return nil, fmt.Errorf("%w: a metadata document must not contain client_secret", ErrInvalid)
 	}
 	for _, gt := range doc.GrantTypes {
-		if gt != string(GrantAuthorizationCode) && gt != string(GrantRefreshToken) {
+		if !slices.Contains(rules.grantTypes, GrantType(gt)) {
 			return nil, fmt.Errorf("%w: grant_type %q is not supported for mcp clients", ErrInvalid, gt)
 		}
 	}

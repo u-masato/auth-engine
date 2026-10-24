@@ -57,12 +57,13 @@ type Metadata struct {
 
 // Protector は 1 つの Resource Server を表し、メタデータの配信とトークン検証のミドルウェアを提供する。
 type Protector struct {
-	resource    string // 正規形
-	metadata    Metadata
-	metadataURL string
-	verifier    TokenVerifier
-	now         func() time.Time
-	logger      *slog.Logger
+	resource     string // 正規形
+	metadata     Metadata
+	metadataURL  string
+	metadataPath string
+	verifier     TokenVerifier
+	now          func() time.Time
+	logger       *slog.Logger
 }
 
 // New は Config を検証して Protector を返す。
@@ -113,7 +114,7 @@ func New(cfg Config) (*Protector, error) {
 	// RFC 9728 §3: path を持つ resource の well-known URI は host と path の間に挿入する。
 	mu := *u
 	mu.Path = WellKnownPath + strings.TrimSuffix(u.Path, "/")
-	p.metadataURL = mu.String()
+	p.metadataURL, p.metadataPath = mu.String(), mu.Path
 	return p, nil
 }
 
@@ -123,10 +124,7 @@ func (p *Protector) Resource() string { return p.resource }
 // MetadataPath は MetadataHandler を mount すべきパス（RFC 9728 §3）。
 // resource が https://mcp.example.com なら /.well-known/oauth-protected-resource、
 // https://mcp.example.com/api なら /.well-known/oauth-protected-resource/api。
-func (p *Protector) MetadataPath() string {
-	u, _ := url.Parse(p.metadataURL)
-	return u.Path
-}
+func (p *Protector) MetadataPath() string { return p.metadataPath }
 
 // MetadataURL は WWW-Authenticate の resource_metadata に載せる絶対 URL。
 func (p *Protector) MetadataURL() string { return p.metadataURL }
@@ -218,6 +216,9 @@ func (p *Protector) Protect(next http.Handler, scopes ...string) http.Handler {
 // audienceMatches は aud に自分の resource が正規形で含まれるかを返す。
 func (p *Protector) audienceMatches(aud []string) bool {
 	for _, a := range aud {
+		if a == p.resource { // 認可サーバーは正規形で発行するので、普段はここで一致する
+			return true
+		}
 		if n, err := resource.Normalize(a); err == nil && n == p.resource {
 			return true
 		}

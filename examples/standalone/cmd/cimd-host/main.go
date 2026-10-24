@@ -88,9 +88,9 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 		ClientName:              o.name,
 		ClientURI:               o.baseURL,
 		RedirectURIs:            o.redirectURIs,
-		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		GrantTypes:              []string{string(client.GrantAuthorizationCode), string(client.GrantRefreshToken)},
 		ResponseTypes:           []string{"code"},
-		TokenEndpointAuthMethod: "none",
+		TokenEndpointAuthMethod: string(client.AuthNone),
 	}
 	if _, err := client.NewMCP(doc, docURL, time.Now()); err != nil {
 		return fmt.Errorf("built-in document: %w", err)

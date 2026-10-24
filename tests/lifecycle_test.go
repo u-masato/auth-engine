@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -63,6 +64,12 @@ func (s *system) runCodeFlow(t *testing.T, b *http.Client, clientID, secret stri
 	if clientID == "web" {
 		registerRedirect(t, s, "web", flow.RedirectURI)
 	}
+	return flow, completeFlow(t, b, flow, cb)
+}
+
+// completeFlow はブラウザで認可 URL を開き（自動承認）、Code を交換してトークンを返す。
+func completeFlow(t *testing.T, b *http.Client, flow *oauthclient.CodeFlow, cb <-chan url.Values) *oauthclient.TokenResponse {
+	t.Helper()
 	res, err := b.Get(flow.AuthorizationURL())
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +83,7 @@ func (s *system) runCodeFlow(t *testing.T, b *http.Client, clientID, secret stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	return flow, tok
+	return tok
 }
 
 func TestOIDCTokenLifecycle(t *testing.T) {

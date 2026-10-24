@@ -144,25 +144,6 @@ func (m *mcpSystem) startMCPFlow(t *testing.T, resourceURL string, scopes []stri
 	return flow, cb, d
 }
 
-// approve はブラウザで認可 URL を開き（自動承認）、Code を交換してトークンを返す。
-func (m *mcpSystem) approve(t *testing.T, b *http.Client, flow *oauthclient.CodeFlow, cb <-chan url.Values) *oauthclient.TokenResponse {
-	t.Helper()
-	res, err := b.Get(flow.AuthorizationURL())
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	code, err := flow.HandleCallback(waitCallback(t, cb))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := flow.Exchange(context.Background(), code)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tok
-}
-
 // call は Access Token で Resource Server を呼び、ステータスと WWW-Authenticate を返す。
 func call(t *testing.T, rawURL, accessToken string) (int, oauthclient.Challenge) {
 	t.Helper()
@@ -198,7 +179,7 @@ func TestMCPClientJWTAndOpaque(t *testing.T) {
 	if d.Challenge.Scope != "mcp:read" || d.Metadata.ResourceName != "JWT MCP Server" {
 		t.Fatalf("discovery: %+v %+v", d.Challenge, d.Metadata)
 	}
-	jwtTok := m.approve(t, b, flow, cb)
+	jwtTok := completeFlow(t, b, flow, cb)
 	if !strings.HasPrefix(jwtTok.AccessToken, "eyJ") || jwtTok.Scope != "mcp:read" || jwtTok.RefreshToken == "" {
 		t.Fatalf("jwt token: %+v", jwtTok)
 	}
@@ -212,7 +193,7 @@ func TestMCPClientJWTAndOpaque(t *testing.T) {
 
 	// Opaque の MCP サーバー: Introspection で検証される
 	flow, cb, _ = m.startMCPFlow(t, m.introURI, nil)
-	opaqueTok := m.approve(t, b, flow, cb)
+	opaqueTok := completeFlow(t, b, flow, cb)
 	if !strings.HasPrefix(opaqueTok.AccessToken, "at_") {
 		t.Fatalf("opaque token: %+v", opaqueTok)
 	}
@@ -255,7 +236,7 @@ func TestMCPStepUpAuthorization(t *testing.T) {
 	ctx := context.Background()
 
 	flow, cb, _ := m.startMCPFlow(t, m.jwtURI, []string{"mcp:read"})
-	tok := m.approve(t, b, flow, cb)
+	tok := completeFlow(t, b, flow, cb)
 	code, ch := call(t, m.jwtURI+"/admin", tok.AccessToken)
 	if code != http.StatusForbidden || ch.Error != "insufficient_scope" || ch.Scope != "mcp:write" || !strings.HasSuffix(ch.ResourceMetadata, "/.well-known/oauth-protected-resource/mcp") {
 		t.Fatalf("admin with read token: %d %+v", code, ch)
@@ -265,7 +246,7 @@ func TestMCPStepUpAuthorization(t *testing.T) {
 	have := strings.Fields(tok.Scope)
 	want := append(have, strings.Fields(ch.Scope)...)
 	flow2, cb2, _ := m.startMCPFlow(t, m.jwtURI, want)
-	tok2 := m.approve(t, b, flow2, cb2)
+	tok2 := completeFlow(t, b, flow2, cb2)
 	if tok2.Scope != "mcp:read mcp:write" {
 		t.Fatalf("step-up token scope: %q", tok2.Scope)
 	}

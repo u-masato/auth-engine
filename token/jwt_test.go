@@ -145,15 +145,8 @@ func TestJWTAccessTokenES256AndOpaqueUnchanged(t *testing.T) {
 func TestJWTAccessTokenClientCredentials(t *testing.T) {
 	f := newFixture(t)
 	set := f.withJWT(t)
-	m2m, secret, err := client.NewMachine(client.MachineParams{ID: "m2m-jwt", Name: "M2M", Scopes: []string{"api:read"}}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.CreateClient(f.ctx, m2m); err != nil {
-		t.Fatal(err)
-	}
-	res, err := f.svc.Exchange(f.ctx, token.Request{GrantType: "client_credentials", Resource: []string{jwtRS256Res},
-		Credentials: token.Credentials{ClientID: "m2m-jwt", Secret: string(secret), Method: client.AuthClientSecretBasic}})
+	res, err := f.svc.Exchange(f.ctx, token.Request{GrantType: "client_credentials", Scope: "api:read", Resource: []string{jwtRS256Res},
+		Credentials: f.machineCreds(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +160,7 @@ func TestJWTAccessTokenClientCredentials(t *testing.T) {
 			t.Fatalf("%s must be omitted for client_credentials: %v", absent, c)
 		}
 	}
-	if c["sub"] != "m2m-jwt" || c["client_id"] != "m2m-jwt" || c["scope"] != "api:read" {
+	if c["sub"] != "m2m" || c["client_id"] != "m2m" || c["scope"] != "api:read" {
 		t.Fatalf("claims: %v", c)
 	}
 }
