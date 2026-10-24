@@ -42,6 +42,10 @@ type Store interface {
 	// LookupRefreshToken は Refresh Token を返す。なければ storage.ErrNotFound。
 	LookupRefreshToken(ctx context.Context, hash string) (*RefreshToken, error)
 
+	// GetTokenFamily は Family を返す。なければ storage.ErrNotFound。
+	// Refresh Token は Family を介して Client・subject・scope に結びつく。
+	GetTokenFamily(ctx context.Context, id string) (*Family, error)
+
 	// RevokeTokenFamily は Family と配下の全トークンを失効させる。
 	// 既に失効済みなら何もせず nil。存在しなければ storage.ErrNotFound。
 	RevokeTokenFamily(ctx context.Context, familyID string, now time.Time) error

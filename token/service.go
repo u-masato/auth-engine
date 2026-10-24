@@ -11,6 +11,7 @@ import (
 
 	"github.com/muno/auth-engine/authorization"
 	"github.com/muno/auth-engine/client"
+	"github.com/muno/auth-engine/grant"
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/internal/rand"
 	"github.com/muno/auth-engine/storage"
@@ -20,20 +21,35 @@ import (
 type Service struct {
 	Clients client.Resolver
 	Store   Store
-	Clock   clock.Clock
+	// Grants は client_credentials が Grant を記録するのに使う。
+	Grants grant.Store
+	Clock  clock.Clock
 	// Logger は監査イベント（発行、再利用検知）の出力先。nil なら slog.Default()。
 	Logger *slog.Logger
 	// IDTokens は openid scope が付与されたときに ID Token を発行する。nil なら発行しない。
 	IDTokens IDTokenIssuer
+
+	// RefreshTokenTTL は Refresh Token の絶対期限、RefreshTokenIdleTTL はスライド期限。
+	// 0 なら既定値（DefaultRefreshTokenTTL / DefaultRefreshTokenIdleTTL）。
+	RefreshTokenTTL     time.Duration
+	RefreshTokenIdleTTL time.Duration
 }
 
-// Request はトークン要求（RFC 6749 §4.1.3）。HTTP 層がフォームから組み立てる。
+// Request はトークン要求（RFC 6749 §4.1.3、§4.4.2、§6）。HTTP 層がフォームから組み立てる。
 type Request struct {
-	GrantType    string
+	GrantType   string
+	Credentials Credentials
+
+	// authorization_code
 	Code         string
 	RedirectURI  string
 	CodeVerifier string
-	Credentials  Credentials
+
+	// refresh_token
+	RefreshToken string
+
+	// Scope は refresh_token / client_credentials の scope パラメータ（空白区切り、未指定なら空）。
+	Scope string
 }
 
 // Response はトークン応答（RFC 6749 §5.1、RFC 6750）。
@@ -52,17 +68,25 @@ func (s *Service) Exchange(ctx context.Context, req Request) (*Response, error) 
 	if err != nil {
 		return nil, err
 	}
-	switch client.GrantType(req.GrantType) {
-	case "":
+	gt := client.GrantType(req.GrantType)
+	if gt == "" {
 		return nil, protocolErr(CodeInvalidRequest, "grant_type is required")
-	case client.GrantAuthorizationCode:
-		if !c.Allows(client.GrantAuthorizationCode) {
-			return nil, protocolErr(CodeUnauthorizedClient, "client is not allowed to use this grant type")
-		}
-		return s.exchangeCode(ctx, c, req)
+	}
+	switch gt {
+	case client.GrantAuthorizationCode, client.GrantRefreshToken, client.GrantClientCredentials:
 	default:
-		// refresh_token と client_credentials は M2 で対応する。
 		return nil, protocolErr(CodeUnsupportedGrantType, "unsupported grant_type")
+	}
+	if !c.Allows(gt) {
+		return nil, protocolErr(CodeUnauthorizedClient, "client is not allowed to use this grant type")
+	}
+	switch gt {
+	case client.GrantAuthorizationCode:
+		return s.exchangeCode(ctx, c, req)
+	case client.GrantRefreshToken:
+		return s.refresh(ctx, c, req)
+	default:
+		return s.clientCredentials(ctx, c, req)
 	}
 }
 
@@ -105,21 +129,34 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 		return nil, protocolErr(CodeInvalidGrant, "code_verifier does not match")
 	}
 
-	access, plaintext, err := s.newAccessToken(c, code.FamilyID, code.GrantID, code.Subject, code.Scopes, now)
+	family := &Family{
+		ID:              code.FamilyID,
+		GrantID:         code.GrantID,
+		ClientID:        c.ID,
+		Subject:         code.Subject,
+		Scopes:          code.Scopes,
+		AuthenticatedAt: code.AuthenticatedAt,
+		AMR:             code.AMR,
+		ACR:             code.ACR,
+		Status:          FamilyActive,
+		CreatedAt:       now,
+	}
+	access, accessPlain, err := s.newAccessToken(c, family, code.Scopes, now)
 	if err != nil {
 		return nil, err
 	}
-	family := &Family{
-		ID:        code.FamilyID,
-		GrantID:   code.GrantID,
-		ClientID:  c.ID,
-		Subject:   code.Subject,
-		Scopes:    code.Scopes,
-		Status:    FamilyActive,
-		CreatedAt: now,
+	var (
+		refresh      *RefreshToken
+		refreshPlain string
+	)
+	if c.IssuesRefreshToken() {
+		family.ExpiresAt = now.Add(s.refreshTTL())
+		refresh, refreshPlain, err = s.newRefreshToken(family, now)
+		if err != nil {
+			return nil, err
+		}
 	}
-	// Refresh Token の発行と ID Token は M2 で追加する。
-	if err := s.Store.IssueTokens(ctx, family, access, nil); err != nil {
+	if err := s.Store.IssueTokens(ctx, family, access, refresh); err != nil {
 		if errors.Is(err, storage.ErrGrantRevoked) {
 			return nil, protocolErr(CodeInvalidGrant, "authorization has been revoked")
 		}
@@ -129,16 +166,17 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 		"event", "token.issued", "client_id", c.ID, "grant_id", code.GrantID, "family_id", family.ID, "grant_type", req.GrantType)
 
 	res := &Response{
-		AccessToken: plaintext,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(access.ExpiresAt.Sub(now) / time.Second),
-		Scope:       strings.Join(code.Scopes, " "),
+		AccessToken:  accessPlain,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(access.ExpiresAt.Sub(now) / time.Second),
+		Scope:        strings.Join(code.Scopes, " "),
+		RefreshToken: refreshPlain,
 	}
 	// OIDC Core §3.1.3.3: openid が付与されていれば ID Token を返す。
 	if s.IDTokens != nil && c.IssuesIDToken() && slices.Contains(code.Scopes, "openid") {
 		idToken, err := s.IDTokens.IssueIDToken(ctx, c, IDTokenInput{
 			Subject: code.Subject, AuthenticatedAt: code.AuthenticatedAt, Nonce: code.Nonce,
-			AMR: code.AMR, ACR: code.ACR, AccessToken: plaintext, Scopes: code.Scopes,
+			AMR: code.AMR, ACR: code.ACR, AccessToken: accessPlain, Scopes: code.Scopes,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("token: issue id token: %w", err)
@@ -169,23 +207,76 @@ func (s *Service) revokeFamilyOnReuse(ctx context.Context, code *authorization.A
 		"event", "code.reuse", "client_id", code.ClientID, "grant_id", code.GrantID, "family_id", code.FamilyID)
 }
 
-// newAccessToken は Opaque な Access Token を生成する。戻り値の plaintext は応答にのみ使う。
-func (s *Service) newAccessToken(c *client.Client, familyID, grantID, subject string, scopes []string, now time.Time) (*AccessToken, string, error) {
+// newAccessToken は family に属する Opaque な Access Token を生成する。戻り値の平文は応答にのみ使う。
+// scopes は family.Scopes の部分集合（Refresh 時の縮小を反映する）。
+func (s *Service) newAccessToken(c *client.Client, family *Family, scopes []string, now time.Time) (*AccessToken, string, error) {
 	plaintext, err := rand.Token(AccessTokenPrefix)
 	if err != nil {
 		return nil, "", err
 	}
 	return &AccessToken{
 		Hash:      rand.Hash(plaintext),
-		FamilyID:  familyID,
-		GrantID:   grantID,
+		FamilyID:  family.ID,
+		GrantID:   family.GrantID,
 		ClientID:  c.ID,
-		Subject:   subject,
+		Subject:   family.Subject,
 		Scopes:    scopes,
 		Status:    AccessActive,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(c.EffectiveAccessTokenTTL()),
 	}, plaintext, nil
+}
+
+// newRefreshToken は family に属する Refresh Token を生成する。期限はスライド期限と
+// Family の絶対期限の早い方。
+func (s *Service) newRefreshToken(family *Family, now time.Time) (*RefreshToken, string, error) {
+	plaintext, err := rand.Token(RefreshTokenPrefix)
+	if err != nil {
+		return nil, "", err
+	}
+	expires := now.Add(s.refreshIdleTTL())
+	if expires.After(family.ExpiresAt) {
+		expires = family.ExpiresAt
+	}
+	return &RefreshToken{
+		Hash:      rand.Hash(plaintext),
+		FamilyID:  family.ID,
+		Status:    RefreshActive,
+		IssuedAt:  now,
+		ExpiresAt: expires,
+	}, plaintext, nil
+}
+
+func (s *Service) refreshTTL() time.Duration {
+	if s.RefreshTokenTTL == 0 {
+		return DefaultRefreshTokenTTL
+	}
+	return s.RefreshTokenTTL
+}
+
+func (s *Service) refreshIdleTTL() time.Duration {
+	if s.RefreshTokenIdleTTL == 0 {
+		return DefaultRefreshTokenIdleTTL
+	}
+	return s.RefreshTokenIdleTTL
+}
+
+// parseScope は scope パラメータ（RFC 6749 §3.3）を分解し、空の要素と不正な scope-token を拒否する。
+// 未指定（空文字）なら nil を返す。
+func parseScope(raw string) ([]string, *Error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, s := range strings.Split(raw, " ") {
+		if !client.ValidScopeToken(s) {
+			return nil, protocolErr(CodeInvalidScope, "malformed scope")
+		}
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) logger() *slog.Logger {

@@ -25,6 +25,8 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		Code:         r.PostForm.Get("code"),
 		RedirectURI:  r.PostForm.Get("redirect_uri"),
 		CodeVerifier: r.PostForm.Get("code_verifier"),
+		RefreshToken: r.PostForm.Get("refresh_token"),
+		Scope:        r.PostForm.Get("scope"),
 		Credentials:  creds,
 	}
 	res, err := s.engine.Token.Exchange(r.Context(), req)

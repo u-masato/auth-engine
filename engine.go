@@ -40,6 +40,10 @@ type Config struct {
 	CodeTTL time.Duration
 	// IDTokenTTL は ID Token の有効期間。0 なら 1 時間、上限 24 時間。
 	IDTokenTTL time.Duration
+	// RefreshTokenTTL は Refresh Token の絶対期限（Token Family の寿命）。0 なら 30 日。
+	// RefreshTokenIdleTTL は最終使用からのスライド期限。0 なら 14 日。絶対期限を超えないこと。
+	RefreshTokenTTL     time.Duration
+	RefreshTokenIdleTTL time.Duration
 }
 
 // Engine は全 Service を配線した本体。HTTP 層（httpapi）はこれを受け取る。
@@ -73,6 +77,19 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.IDTokenTTL < 0 || cfg.IDTokenTTL > 24*time.Hour {
 		return nil, errors.New("authengine: IDTokenTTL must be within (0, 24h]")
 	}
+	if cfg.RefreshTokenTTL < 0 || cfg.RefreshTokenIdleTTL < 0 {
+		return nil, errors.New("authengine: RefreshTokenTTL and RefreshTokenIdleTTL must not be negative")
+	}
+	refreshTTL, refreshIdle := cfg.RefreshTokenTTL, cfg.RefreshTokenIdleTTL
+	if refreshTTL == 0 {
+		refreshTTL = token.DefaultRefreshTokenTTL
+	}
+	if refreshIdle == 0 {
+		refreshIdle = token.DefaultRefreshTokenIdleTTL
+	}
+	if refreshIdle > refreshTTL {
+		return nil, errors.New("authengine: RefreshTokenIdleTTL must not exceed RefreshTokenTTL")
+	}
 	if cfg.Keys == nil {
 		return nil, errors.New("authengine: Keys is required")
 	}
@@ -102,11 +119,14 @@ func New(cfg Config) (*Engine, error) {
 		CodeTTL:        cfg.CodeTTL,
 	}
 	e.Token = &token.Service{
-		Clients:  cfg.Store,
-		Store:    cfg.Store,
-		Clock:    clk,
-		Logger:   logger,
-		IDTokens: e.IDTokens,
+		Clients:             cfg.Store,
+		Store:               cfg.Store,
+		Grants:              cfg.Store,
+		Clock:               clk,
+		Logger:              logger,
+		IDTokens:            e.IDTokens,
+		RefreshTokenTTL:     refreshTTL,
+		RefreshTokenIdleTTL: refreshIdle,
 	}
 	return e, nil
 }

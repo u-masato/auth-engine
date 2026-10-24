@@ -30,7 +30,8 @@ func TestNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.Authorization == nil || e.Token == nil || e.Authorization.Issuer != "https://as.example.com" || e.Clock == nil || e.IDTokens == nil || e.Token.IDTokens == nil {
+	if e.Authorization == nil || e.Token == nil || e.Authorization.Issuer != "https://as.example.com" || e.Clock == nil || e.IDTokens == nil ||
+		e.Token.IDTokens == nil || e.Token.Grants == nil || e.Token.RefreshTokenTTL != 30*24*time.Hour || e.Token.RefreshTokenIdleTTL != 14*24*time.Hour {
 		t.Fatalf("engine not wired: %+v", e)
 	}
 	if time.Since(e.Clock.Now()) > time.Minute {
@@ -49,6 +50,9 @@ func TestNew(t *testing.T) {
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, TransactionTTL: 2 * time.Hour},
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, CodeTTL: time.Hour},
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, IDTokenTTL: 48 * time.Hour},
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: -time.Hour},
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: 24 * time.Hour}, // 既定のスライド期限 14 日を下回る
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: 48 * time.Hour, RefreshTokenIdleTTL: 72 * time.Hour},
 	}
 	for i, cfg := range bad {
 		if _, err := authengine.New(cfg); err == nil {

@@ -19,6 +19,13 @@ type Family struct {
 	// Scopes はこの Family のトークンに付く scope。Grant の scope の部分集合。
 	Scopes []string
 
+	// AuthenticatedAt / AMR / ACR は元の認証の情報。Refresh 時に発行する ID Token の
+	// auth_time / amr / acr は元の認証を表さなければならない（OIDC Core §12.2）ため、
+	// Family に写しを持つ。client_credentials の Family ではゼロ値。
+	AuthenticatedAt time.Time
+	AMR             []string
+	ACR             string
+
 	Status    FamilyStatus
 	CreatedAt time.Time
 	// ExpiresAt は Refresh Token の絶対期限（Family 全体の寿命）。Refresh Token を
@@ -26,6 +33,15 @@ type Family struct {
 	ExpiresAt time.Time
 	RevokedAt time.Time // ゼロ値なら未失効
 }
+
+// Refresh Token の有効期間の既定値（ADR-0006 §4）。
+//
+//   - 絶対期限: Family 作成からの寿命。Rotation しても延びない。
+//   - スライド期限: 最終使用からの寿命。Rotation のたびに延びるが、絶対期限を超えない。
+const (
+	DefaultRefreshTokenTTL     = 30 * 24 * time.Hour
+	DefaultRefreshTokenIdleTTL = 14 * 24 * time.Hour
+)
 
 // Active は失効していないかを返す。
 func (f *Family) Active() bool { return f.Status == FamilyActive }

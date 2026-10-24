@@ -669,3 +669,97 @@ func TestConfigValidation(t *testing.T) {
 		t.Error("empty bearer token must reject")
 	}
 }
+
+// obtainTokens は Code フローを完走してトークン応答を返す。
+func (e *env) obtainTokens(t *testing.T) token.Response {
+	t.Helper()
+	cookie, txnID, _ := e.authorize(authorizeQuery())
+	rec := e.resume(e.complete(txnID), cookie)
+	cb, _ := url.Parse(rec.Header().Get("Location"))
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {cb.Query().Get("code")}, "redirect_uri": {redirectURI}, "code_verifier": {rfcVerifier}}
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token: %d %s", rec.Code, rec.Body)
+	}
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	return res
+}
+
+func TestRefreshTokenGrant(t *testing.T) {
+	e := newEnv(t)
+	first := e.obtainTokens(t)
+	if !strings.HasPrefix(first.RefreshToken, "rt_") {
+		t.Fatalf("refresh token must be issued: %+v", first)
+	}
+	e.now = e.now.Add(time.Hour)
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {first.RefreshToken}, "scope": {"openid"}}
+	rec := e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh: %d %s", rec.Code, rec.Body)
+	}
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if res.RefreshToken == "" || res.RefreshToken == first.RefreshToken || res.Scope != "openid" || res.IDToken == "" {
+		t.Fatalf("refresh response: %s", rec.Body)
+	}
+	// Refresh で出た ID Token は nonce を持たず、auth_time は元の認証時刻
+	var idc struct {
+		Nonce    string `json:"nonce"`
+		AuthTime int64  `json:"auth_time"`
+		Iat      int64  `json:"iat"`
+	}
+	if _, err := e.keys.Verify(res.IDToken, &idc); err != nil {
+		t.Fatal(err)
+	}
+	if idc.Nonce != "" || idc.AuthTime != now.Add(-time.Minute).Unix() || idc.Iat != e.now.Unix() {
+		t.Fatalf("refreshed id token: %+v", idc)
+	}
+	// 旧 Refresh Token の再提示は invalid_grant
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_grant"`) {
+		t.Fatalf("refresh reuse: %d %s", rec.Code, rec.Body)
+	}
+	// scope 拡大は invalid_scope
+	form.Set("refresh_token", res.RefreshToken)
+	form.Set("scope", "openid profile email")
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_scope"`) {
+		t.Fatalf("scope escalation: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestClientCredentialsGrant(t *testing.T) {
+	e := newEnv(t)
+	m2m, secret, err := client.NewMachine(client.MachineParams{ID: "svc", Name: "Service", Scopes: []string{"api"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateClient(context.Background(), m2m); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"grant_type": {"client_credentials"}}
+	rec := e.do(e.public, e.tokenReq(form, "svc", string(secret)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("client_credentials: %d %s", rec.Code, rec.Body)
+	}
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if !strings.HasPrefix(res.AccessToken, "at_") || res.Scope != "api" || res.RefreshToken != "" || res.IDToken != "" {
+		t.Fatalf("client_credentials response: %s", rec.Body)
+	}
+	at, g, err := e.store.LookupAccessToken(context.Background(), rand.Hash(res.AccessToken))
+	if err != nil || at.Subject != "svc" || g.Subject != "svc" {
+		t.Fatalf("stored: %+v %+v %v", at, g, err)
+	}
+	// Web クライアントには unauthorized_client
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"unauthorized_client"`) {
+		t.Fatalf("web client_credentials: %d %s", rec.Code, rec.Body)
+	}
+	// Discovery に 3 つの grant_type が載る
+	rec = e.do(e.public, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
+	if !strings.Contains(rec.Body.String(), `"grant_types_supported":["authorization_code","refresh_token","client_credentials"]`) {
+		t.Fatalf("grant_types_supported: %s", rec.Body)
+	}
+}

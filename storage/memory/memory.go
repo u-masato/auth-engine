@@ -307,6 +307,16 @@ func (s *Store) LookupRefreshToken(_ context.Context, hash string) (*token.Refre
 	return clone(t), nil
 }
 
+func (s *Store) GetTokenFamily(_ context.Context, id string) (*token.Family, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.families[id]
+	if !ok {
+		return nil, storage.ErrNotFound
+	}
+	return clone(f), nil
+}
+
 func (s *Store) RevokeTokenFamily(_ context.Context, familyID string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

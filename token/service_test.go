@@ -62,10 +62,11 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	clk := clock.NewFixed(now)
 	return &fixture{
-		svc:       &token.Service{Clients: store, Store: store, Clock: clock.NewFixed(now), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
+		svc:       &token.Service{Clients: store, Store: store, Grants: store, Clock: clk, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))},
 		store:     store,
-		clock:     clock.NewFixed(now),
+		clock:     clk,
 		ctx:       ctx,
 		webSecret: string(secret),
 		grantID:   g.ID,
@@ -120,7 +121,7 @@ func TestExchangeSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(res.AccessToken, token.AccessTokenPrefix) || res.TokenType != "Bearer" || res.ExpiresIn != 3600 ||
-		res.Scope != "openid profile" || res.RefreshToken != "" || res.IDToken != "" {
+		res.Scope != "openid profile" || !strings.HasPrefix(res.RefreshToken, token.RefreshTokenPrefix) || res.IDToken != "" {
 		t.Fatalf("response: %+v", res)
 	}
 	at, g, err := f.store.LookupAccessToken(f.ctx, rand.Hash(res.AccessToken))
@@ -129,6 +130,15 @@ func TestExchangeSuccess(t *testing.T) {
 	}
 	if at.ClientID != "web" || at.Subject != "alice" || at.GrantID != f.grantID || !at.Valid(now) || !at.ExpiresAt.Equal(now.Add(time.Hour)) || !g.Active() {
 		t.Fatalf("stored token: %+v", at)
+	}
+	// Web Profile は Refresh Token を発行する。Family は絶対期限 30 日、Refresh Token はスライド期限 14 日
+	rt, err := f.store.LookupRefreshToken(f.ctx, rand.Hash(res.RefreshToken))
+	if err != nil || rt.FamilyID != at.FamilyID || rt.Status != token.RefreshActive || !rt.ExpiresAt.Equal(now.Add(14*24*time.Hour)) {
+		t.Fatalf("stored refresh token: %+v %v", rt, err)
+	}
+	fam, err := f.store.GetTokenFamily(f.ctx, at.FamilyID)
+	if err != nil || !fam.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || !fam.AuthenticatedAt.Equal(now) {
+		t.Fatalf("stored family: %+v %v", fam, err)
 	}
 	if _, _, err := f.store.LookupAccessToken(f.ctx, res.AccessToken); err == nil {
 		t.Fatal("plaintext token must not be a lookup key")
@@ -191,7 +201,10 @@ func TestGrantTypeErrors(t *testing.T) {
 	req.GrantType = "password"
 	wantProtocolErr(t, mustErr(f.svc.Exchange(f.ctx, req)), token.CodeUnsupportedGrantType)
 	req.GrantType = "refresh_token"
-	wantProtocolErr(t, mustErr(f.svc.Exchange(f.ctx, req)), token.CodeUnsupportedGrantType)
+	wantProtocolErr(t, mustErr(f.svc.Exchange(f.ctx, req)), token.CodeInvalidRequest) // refresh_token パラメータなし
+	// Web Profile は client_credentials を使えない
+	req.GrantType = "client_credentials"
+	wantProtocolErr(t, mustErr(f.svc.Exchange(f.ctx, req)), token.CodeUnauthorizedClient)
 
 	// Machine Profile は authorization_code を使えない
 	m2m, _ := f.store.GetClient(f.ctx, "svc")

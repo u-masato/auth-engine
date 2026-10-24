@@ -47,7 +47,31 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, codeHash string, n
 	return code, cerr
 }
 
-const familyColumns = `id, grant_id, client_id, subject, scopes, status, created_at, expires_at, revoked_at`
+const familyColumns = `id, grant_id, client_id, subject, scopes, authenticated_at, amr, acr, status, created_at, expires_at, revoked_at`
+
+func scanFamily(row rowScanner) (*token.Family, error) {
+	var (
+		f                                        token.Family
+		scopes, amr                              sql.NullString
+		authenticated, created, expires, revoked sql.NullInt64
+	)
+	err := row.Scan(&f.ID, &f.GrantID, &f.ClientID, &f.Subject, &scopes, &authenticated, &amr, &f.ACR, &f.Status, &created, &expires, &revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, storage.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := fromJSON(scopes, &f.Scopes); err != nil {
+		return nil, err
+	}
+	if err := fromJSON(amr, &f.AMR); err != nil {
+		return nil, err
+	}
+	f.AuthenticatedAt, f.CreatedAt, f.ExpiresAt, f.RevokedAt = fromNanos(authenticated), fromNanos(created), fromNanos(expires), fromNanos(revoked)
+	return &f, nil
+}
+
 const accessColumns = `hash, family_id, grant_id, client_id, subject, scopes, status, issued_at, expires_at, revoked_at`
 const refreshColumns = `hash, family_id, status, replaced_by_hash, issued_at, expires_at, rotated_at, revoked_at`
 
@@ -125,6 +149,10 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 	if err != nil {
 		return err
 	}
+	amr, err := toJSON(family.AMR)
+	if err != nil {
+		return err
+	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		var status string
 		err := tx.QueryRowContext(ctx, `SELECT status FROM grants WHERE id = ?`, family.GrantID).Scan(&status)
@@ -141,9 +169,9 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 		if dup > 0 {
 			return storage.ErrAlreadyExists
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO token_families (`+familyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			family.ID, family.GrantID, family.ClientID, family.Subject, scopes, string(family.Status),
-			mustNanos(family.CreatedAt), nanos(family.ExpiresAt), nanos(family.RevokedAt))
+		_, err = tx.ExecContext(ctx, `INSERT INTO token_families (`+familyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			family.ID, family.GrantID, family.ClientID, family.Subject, scopes, nanos(family.AuthenticatedAt), amr, family.ACR,
+			string(family.Status), mustNanos(family.CreatedAt), nanos(family.ExpiresAt), nanos(family.RevokedAt))
 		if err != nil {
 			return err
 		}
@@ -214,6 +242,10 @@ func (s *Store) LookupAccessToken(ctx context.Context, hash string) (*token.Acce
 
 func (s *Store) LookupRefreshToken(ctx context.Context, hash string) (*token.RefreshToken, error) {
 	return scanRefresh(s.db.QueryRowContext(ctx, `SELECT `+refreshColumns+` FROM refresh_tokens WHERE hash = ?`, hash))
+}
+
+func (s *Store) GetTokenFamily(ctx context.Context, id string) (*token.Family, error) {
+	return scanFamily(s.db.QueryRowContext(ctx, `SELECT `+familyColumns+` FROM token_families WHERE id = ?`, id))
 }
 
 func (s *Store) RevokeTokenFamily(ctx context.Context, familyID string, now time.Time) error {

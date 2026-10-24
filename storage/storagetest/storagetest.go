@@ -113,6 +113,7 @@ func newGrant(id, clientID, subject string, scopes ...string) *grant.Grant {
 func newFamily(id, grantID string) *token.Family {
 	return &token.Family{
 		ID: id, GrantID: grantID, ClientID: "c1", Subject: "alice", Scopes: []string{"openid"},
+		AuthenticatedAt: base.Add(-time.Minute), AMR: []string{"pwd"}, ACR: "urn:acr:1",
 		Status: token.FamilyActive, CreatedAt: base, ExpiresAt: base.Add(30 * 24 * time.Hour),
 	}
 }
@@ -493,6 +494,14 @@ func testIssueTokens(t *testing.T, s authengine.Store) {
 	wantErr(t, err, storage.ErrNotFound, "unknown access")
 	_, err = s.LookupRefreshToken(ctx, "nope")
 	wantErr(t, err, storage.ErrNotFound, "unknown refresh")
+	gotF, err := s.GetTokenFamily(ctx, f.ID)
+	if err != nil || gotF.GrantID != g.ID || gotF.ClientID != "c1" || gotF.Subject != "alice" || !slices.Equal(gotF.Scopes, f.Scopes) ||
+		!gotF.AuthenticatedAt.Equal(f.AuthenticatedAt) || !slices.Equal(gotF.AMR, f.AMR) || gotF.ACR != f.ACR ||
+		!gotF.ExpiresAt.Equal(f.ExpiresAt) || !gotF.Active() {
+		t.Fatalf("get family: %+v, %v", gotF, err)
+	}
+	_, err = s.GetTokenFamily(ctx, "nope")
+	wantErr(t, err, storage.ErrNotFound, "unknown family")
 
 	// Refresh なしでも発行できる
 	f2 := newFamily("f2", g.ID)
@@ -663,6 +672,9 @@ func testRevokeTokenFamily(t *testing.T, s authengine.Store) {
 	}
 	if !gg.Active() {
 		t.Fatalf("family revoke must not revoke the grant: %+v", gg)
+	}
+	if fam, err := s.GetTokenFamily(ctx, f.ID); err != nil || fam.Active() || !fam.RevokedAt.Equal(now) {
+		t.Fatalf("family must be revoked: %+v, %v", fam, err)
 	}
 	r, _ := s.LookupRefreshToken(ctx, rt.Hash)
 	if r.Status != token.RefreshRevoked {

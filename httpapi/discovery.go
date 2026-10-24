@@ -44,7 +44,7 @@ func (s *Server) baseMetadata() metadata {
 		ScopesSupported:                   oidc.StandardScopes,
 		ResponseTypesSupported:            []string{"code"},
 		ResponseModesSupported:            []string{"query"},
-		GrantTypesSupported:               []string{"authorization_code"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "client_credentials"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
 		AuthorizationResponseIssParameterSupported: true,
