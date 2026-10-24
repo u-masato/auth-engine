@@ -1,0 +1,16 @@
+# ビルド・テスト生成物
+/bin/
+*.test
+*.out
+coverage.html
+
+# ローカル DB・鍵（examples 実行時）
+*.db
+*.db-wal
+*.db-shm
+*.pem
+
+# エディタ
+.idea/
+.vscode/
+.DS_Store
