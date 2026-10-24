@@ -1,6 +1,6 @@
 # 組み込みガイド（エンジンを自分のサービスに載せる人向け）
 
-- 対象バージョン: M3 タスク 2 時点の main（2026-10-24）
+- 対象バージョン: M3 タスク 3 時点の main（2026-10-25）
 - 前提: Go 1.26 以上。OAuth 2.0 の Authorization Code + PKCE の流れを知っていること
 - 動く全体像: [examples/standalone/cmd/server/main.go](../examples/standalone/cmd/server/main.go)（エンジン + Interaction API + デモのログイン画面を 1 プロセスで起動する）
 
@@ -143,10 +143,21 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
 ## 7. Resource Server
 
 - Access Token の受け手（API）は `Config.Resources` に静的に列挙する（RFC 8707、[ADR-0008](adr/0008-mcp-integration.md) §1）。一覧にない `resource` を指定した要求は `invalid_target` になる。
-- 現在の Access Token は Opaque（`at_` で始まる乱数）である。Resource Server は次のどちらかで検証する。
+- Access Token の形式は resource ごとに `Resource.AccessTokenFormat` で選ぶ（ADR-0008 §3）。`resource` を指定しない要求のトークンは常に Opaque になる。1 つの要求で複数の resource を指定するときは、それらの形式が揃っていなければならず、混在すると `invalid_target` になる。
+
+| 形式 | 中身 | Resource Server での検証 | 失効の伝わり方 |
+| --- | --- | --- | --- |
+| `resource.FormatOpaque`（既定） | `at_` で始まる乱数 | Introspection か Go API の `Inspect` | すぐ伝わる |
+| `resource.FormatJWT` | RFC 9068 の JWT（`typ: at+jwt`。署名は `AccessTokenAlg` で RS256 / ES256、既定は RS256） | `/jwks` の公開鍵でローカル検証。Introspection も使える | ローカル検証では `exp` まで伝わらない |
+
+- **Opaque の検証**は次のどちらかで行う。
   - **別プロセスのとき**: `POST /introspect`（RFC 7662）を呼ぶ。Resource Server 自身を Machine Profile の Client として登録し、その資格情報で認証する。
   - **同じプロセスのとき**: Go API の `engine.Token.Inspect` を呼ぶ。例は [`token.ExampleService_Inspect`](../token/example_test.go)。
-  - どちらの場合も、`active` が true であることに加えて、`aud`（Go API では `Introspection.Audience`）に自分の resource URI が含まれ、必要な scope が付いていることを確かめる。ほかの Resource Server 向けに発行されたトークンを受け入れないためである（RFC 8707 §2、RFC 9068 §4 と同じ考え方）。
+  - どちらの場合も、`active` が true であることに加えて、`aud`（Go API では `Introspection.Audience`）に自分の resource URI が含まれ、必要な scope が付いていることを確かめる。ほかの Resource Server 向けに発行されたトークンを受け入れないためである（RFC 8707 §2）。
+- **JWT の検証**では、`typ` が `at+jwt` であること（ID Token との混同を防ぐ）、`iss` が Issuer と一致すること、`aud` に自分の resource URI が含まれること、`exp` が未来であること、`alg` が許可したものであることを確かめる（RFC 9068 §4）。例は [`token.ExampleJWTIssuer`](../token/example_test.go)。
+  - JWT を選ぶ resource には、`AccessTokenTTL` の短い Client を組み合わせる。失効させても、ローカル検証では `exp` まで有効に見えるためである。
+  - `Engine.New` は、JWT を選んだ resource の署名アルゴリズムに対応する鍵が `Keys` にあることを起動時に確かめる。ES256 を選ぶなら ES256 の署名鍵も用意する。
+  - Resource Server は JWKS をキャッシュするので、鍵をローテーションするときは §6 の手順で旧鍵を残しておく。
 - 管理画面やサポート対応からの失効には Go API を使う。トークンを 1 本だけ失効させるなら `engine.Token.RevokeToken`、ユーザーと Client の連携を解除するなら `engine.Grants.Revoke` を呼ぶ。例は [`token.ExampleService_RevokeToken`](../token/example_test.go) と [`grant.ExampleService_Revoke`](../grant/example_test.go)。
 
 ## 8. ログと監査
