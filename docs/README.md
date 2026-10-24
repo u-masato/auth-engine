@@ -7,7 +7,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 
 | 文書 | 内容 |
 | --- | --- |
-| [rfcs.md](../rfcs.md) | 準拠仕様の段階分け（P0〜P3） |
+| [準拠仕様一覧](specifications.md) | 準拠仕様の段階分け（P0〜P3） |
 | [ADR-0001 スコープと設計原則](adr/0001-scope-and-principles.md) | 本体と外部アプリの責務分担、設計原則、P0 で提供しないもの |
 | [ADR-0002 技術スタック](adr/0002-tech-stack.md) | 言語・ライブラリ・ツールの採否 |
 | [ADR-0003 Interaction App との契約](adr/0003-interaction-contract.md) | **最重要**。Authorization Transaction の引き渡し、完了通知、認証、タイムアウト、ハイジャック対策 |

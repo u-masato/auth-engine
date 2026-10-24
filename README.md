@@ -44,7 +44,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 - [設計ドキュメント索引](docs/README.md) — ADR と技術スタック案に対する判断の要約
 - [Interaction App との契約](docs/adr/0003-interaction-contract.md) — ヘッドレス構成の核心
 - [Interaction API 仕様](docs/interaction-api.md) — Interaction App 実装者向け
-- [準拠仕様一覧](rfcs.md) — P0〜P3 の段階分け
+- [準拠仕様一覧](docs/specifications.md) — P0〜P3 の段階分け
 - [ロードマップ](docs/roadmap.md) — M1〜M4 とタスク順序、M1 / M2 の実施結果
 - [Conformance Suite](docs/conformance.md) — Basic OP プロファイルをローカルで回す手順と想定結果
 
