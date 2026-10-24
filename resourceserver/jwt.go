@@ -161,15 +161,19 @@ func (v *JWTVerifier) keySet(ctx context.Context, force bool) (*keys.Set, error)
 	default:
 		return v.set, nil
 	}
-	// 再取得に失敗したとき、手元に JWKS があればそれで続ける。次の再試行は MinRefresh の後にし、
-	// 認可サーバーの障害中に要求ごとの取得が続かないようにする。手元になければ err を返す（fail-closed）。
+	// 再取得に失敗したとき、手元に JWKS があればそれで続ける。手元になければ err を返す（fail-closed）。
+	// 認可サーバーの障害中に要求ごとの取得が続かないよう、次の再試行は MinRefresh の後にする。
+	// ただし呼び出し側の ctx が終わっただけ（切断・期限）なら認可サーバーの障害ではないので間引かない。
+	// 間引くと、鍵ローテーション直後の正しいトークンを MinRefresh の間「未知の kid」で拒否してしまう。
 	fail := func(err error) (*keys.Set, error) {
 		if v.set == nil {
 			return nil, err
 		}
-		v.fetchedAt = now
-		if retry := now.Add(minRefresh); v.expires.Before(retry) {
-			v.expires = retry
+		if ctx.Err() == nil {
+			v.fetchedAt = now
+			if retry := now.Add(minRefresh); v.expires.Before(retry) {
+				v.expires = retry
+			}
 		}
 		return v.set, nil
 	}
