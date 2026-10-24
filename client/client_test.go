@@ -2,6 +2,7 @@ package client
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,18 @@ func TestValidationErrors(t *testing.T) {
 			_, _, err := NewWeb(WebParams{ID: "my client", Name: "w", RedirectURIs: validRedirect, Scopes: []string{"openid"}}, now)
 			return err
 		}},
+		{"web: relative resource", func() error {
+			_, _, err := NewWeb(WebParams{Name: "w", RedirectURIs: validRedirect, Scopes: []string{"openid"}, Resources: []string{"api.example.com"}}, now)
+			return err
+		}},
+		{"web: resource with fragment", func() error {
+			_, _, err := NewWeb(WebParams{Name: "w", RedirectURIs: validRedirect, Scopes: []string{"openid"}, Resources: []string{"https://api.example.com#x"}}, now)
+			return err
+		}},
+		{"web: duplicate resource after normalization", func() error {
+			_, _, err := NewWeb(WebParams{Name: "w", RedirectURIs: validRedirect, Scopes: []string{"openid"}, Resources: []string{"https://api.example.com", "https://API.example.com"}}, now)
+			return err
+		}},
 		{"web: id too long", func() error {
 			_, _, err := NewWeb(WebParams{ID: strings.Repeat("a", 256), Name: "w", RedirectURIs: validRedirect, Scopes: []string{"openid"}}, now)
 			return err
@@ -148,6 +161,49 @@ func TestValidationErrors(t *testing.T) {
 				t.Fatalf("want ErrInvalid, got %v", err)
 			}
 		})
+	}
+}
+
+func TestResources(t *testing.T) {
+	// 空なら全 resource を許可する
+	open, _, err := NewWeb(WebParams{Name: "w", RedirectURIs: []string{"https://app.example.com/cb"}, Scopes: []string{"openid"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open.Resources) != 0 || !open.AllowsResource("https://anything.example.com") {
+		t.Fatalf("unrestricted client must allow any resource: %+v", open.Resources)
+	}
+
+	// 指定があれば正規形で保持し、照合も正規化して行う
+	in := []string{"https://API.example.com", "urn:example:billing"}
+	limited, _, err := NewMachine(MachineParams{Name: "m", Scopes: []string{"api"}, Resources: in}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(limited.Resources, []string{"https://api.example.com", "urn:example:billing"}) {
+		t.Fatalf("resources must be normalized: %v", limited.Resources)
+	}
+	if in[0] != "https://API.example.com" {
+		t.Fatal("constructor must not modify the caller's slice")
+	}
+	tests := map[string]bool{
+		"https://api.example.com":  true,
+		"HTTPS://api.EXAMPLE.com":  true,
+		"urn:example:billing":      true,
+		"https://api.example.com/": false, // 末尾スラッシュは別の resource
+		"https://mcp.example.com":  false,
+		"api.example.com":          false,
+		"":                         false,
+	}
+	for uri, want := range tests {
+		if got := limited.AllowsResource(uri); got != want {
+			t.Errorf("AllowsResource(%q) = %v, want %v", uri, got, want)
+		}
+	}
+	// Adapter から復元した値も Validate で検証される
+	limited.Resources = []string{"https://api.example.com", "https://api.example.com"}
+	if err := limited.Validate(); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("duplicate resources must fail validation: %v", err)
 	}
 }
 

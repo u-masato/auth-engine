@@ -69,6 +69,7 @@ func newWebClient(t *testing.T, id string) *client.Client {
 		ID: id, Name: "Test " + id,
 		RedirectURIs: []string{"https://app.example.com/cb"},
 		Scopes:       []string{"openid", "profile", "email"},
+		Resources:    []string{"https://api.example.com", "urn:example:billing"},
 	}, base)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +97,8 @@ func newCode(hash, grantID, familyID string) *authorization.AuthorizationCode {
 	return &authorization.AuthorizationCode{
 		Hash: hash, TxnID: "t1", ClientID: "c1", GrantID: grantID, FamilyID: familyID,
 		Subject: "alice", RedirectURI: "https://app.example.com/cb", RedirectURIExplicit: true,
-		Scopes: []string{"openid"}, CodeChallenge: "ch", CodeChallengeMethod: "S256", Nonce: "n",
+		Scopes: []string{"openid"}, Resource: []string{"https://api.example.com"},
+		CodeChallenge: "ch", CodeChallengeMethod: "S256", Nonce: "n",
 		AuthenticatedAt: base, Claims: map[string]any{"name": "Alice"},
 		CreatedAt: base, ExpiresAt: base.Add(time.Minute),
 	}
@@ -172,7 +174,7 @@ func testClient(t *testing.T, s authengine.Store) {
 	}
 	if got.ID != c.ID || got.Profile != c.Profile || got.SecretHash != c.SecretHash ||
 		!slices.Equal(got.RedirectURIs, c.RedirectURIs) || !slices.Equal(got.Scopes, c.Scopes) ||
-		!got.CreatedAt.Equal(c.CreatedAt) {
+		!slices.Equal(got.Resources, c.Resources) || !got.CreatedAt.Equal(c.CreatedAt) {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, c)
 	}
 	if err := got.Validate(); err != nil {
@@ -180,6 +182,19 @@ func testClient(t *testing.T, s authengine.Store) {
 	}
 	_, err = s.GetClient(ctx, "missing")
 	wantErr(t, err, storage.ErrNotFound, "missing client")
+
+	// resource 制限なし（空）の Client は空のまま戻る
+	open, err := client.NewNative(client.NativeParams{ID: "c-open", Name: "Open", RedirectURIs: []string{"http://127.0.0.1/cb"}, Scopes: []string{"openid"}}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateClient(ctx, open); err != nil {
+		t.Fatal(err)
+	}
+	gotOpen, err := s.GetClient(ctx, "c-open")
+	if err != nil || len(gotOpen.Resources) != 0 || !gotOpen.AllowsResource("https://any.example.com") {
+		t.Fatalf("client without resources: %+v, %v", gotOpen, err)
+	}
 }
 
 // --- transaction ---
@@ -327,7 +342,8 @@ func testAuthorizationCode(t *testing.T, s authengine.Store) {
 		t.Fatal(err)
 	}
 	if got.Hash != "h1" || got.GrantID != g.ID || got.FamilyID != "f1" || got.Subject != "alice" ||
-		!got.RedirectURIExplicit || got.Claims["name"] != "Alice" || !got.ConsumedAt.Equal(now) || !got.AuthenticatedAt.Equal(base) {
+		!got.RedirectURIExplicit || got.Claims["name"] != "Alice" || !got.ConsumedAt.Equal(now) || !got.AuthenticatedAt.Equal(base) ||
+		!slices.Equal(got.Resource, code.Resource) {
 		t.Fatalf("consumed code mismatch: %+v", got)
 	}
 

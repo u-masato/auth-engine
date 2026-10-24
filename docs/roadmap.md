@@ -134,6 +134,14 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
 
 タスク 1〜3 は直列。4 は 1 と並行可能。5 は 1 と 4 の後。6 は 2〜3 の後（JWT 検証と Introspection の `aud` を使う）。7〜8 は 5〜6 の後。
 
+### M3 の実施結果（進行中）
+
+- **タスク 1（2026-10-24 完了）**: `resource` パッケージ（`Resource` / `Format` / `Set`、`Normalize`）、`Config.Resources`、`Client.Resources`（全 Profile の `Params` に追加、正規形で保持）、認可要求の `resource` 検証（構文違反・未設定・Client の許可範囲外・形式不一致は `invalid_target`、リダイレクトして返す）、`Request.Resource` と `AuthorizationCode.Resource` の引き継ぎ、SQLite migration `00003` / PostgreSQL migration `00002`、`storagetest` の更新。計画との差分と補足:
+  - `resource.Normalize` は RFC 8707 §2 の「絶対 URI」をそのまま採り、`https` に限定しない（`urn:` も受理する）。MCP は `https` を使うが、RFC 8707 自体は scheme を限定しないため。host を持たない `scheme:` だけの値は拒否する。
+  - 複数 `resource` の Access Token 形式の一致検査（ADR-0008 §3）は、形式を決める `Resource.AccessTokenFormat` がタスク 1 で入るので、認可要求側の検証に含めた。
+  - `Resource.Scopes`（resource ごとの scope 上限）は型と検証だけを入れ、要求 scope の絞り込みはトークン発行側のタスク 2 で行う。認可要求の `scope` は AS 自身向け（`openid` 等）と resource 向けが混在するため、認可要求の段階で `resource.Scopes ⊆` を強制すると OIDC と併用できない。
+  - `resource=`（値なし）は RFC 6749 §3.1 のとおり省略として扱う。正規形で重複する値は 1 つにまとめる。
+
 ### M3 で明示的に先送りするもの
 
 - Dynamic Client Registration（RFC 7591）。合意事項 8 のとおり実装しない

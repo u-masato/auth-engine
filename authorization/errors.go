@@ -16,6 +16,10 @@ const (
 	CodeServerError             = "server_error"
 	CodeTemporarilyUnavailable  = "temporarily_unavailable"
 
+	// CodeInvalidTarget は resource パラメータが不正、または設定・Client の許可範囲にない
+	// Resource Server を指している（RFC 8707 §2）。
+	CodeInvalidTarget = "invalid_target"
+
 	CodeInteractionRequired    = "interaction_required"
 	CodeLoginRequired          = "login_required"
 	CodeConsentRequired        = "consent_required"

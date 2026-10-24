@@ -6,6 +6,7 @@ import (
 
 	authengine "github.com/muno/auth-engine"
 	"github.com/muno/auth-engine/keys"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage/memory"
 )
 
@@ -37,6 +38,17 @@ func TestNew(t *testing.T) {
 	if time.Since(e.Clock.Now()) > time.Minute {
 		t.Fatal("default clock must be real time")
 	}
+	if e.Resources == nil || e.Resources.Len() != 0 || e.Authorization.Resources != e.Resources {
+		t.Fatalf("resources must default to an empty set wired into authorization: %+v", e.Resources)
+	}
+	withRes, err := authengine.New(authengine.Config{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks,
+		Resources: []resource.Resource{{URI: "https://MCP.example.com", AccessTokenFormat: resource.FormatJWT}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := withRes.Authorization.Resources.Lookup("https://mcp.example.com"); !ok || r.EffectiveFormat() != resource.FormatJWT {
+		t.Fatalf("resources not wired: %+v %v", r, ok)
+	}
 
 	bad := []authengine.Config{
 		{Issuer: "", Store: memory.New(), Keys: ks},
@@ -53,6 +65,9 @@ func TestNew(t *testing.T) {
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: -time.Hour},
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: 24 * time.Hour}, // 既定のスライド期限 14 日を下回る
 		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, RefreshTokenTTL: 48 * time.Hour, RefreshTokenIdleTTL: 72 * time.Hour},
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "mcp.example.com"}}},                                       // 相対 URI
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "https://a.example.com"}, {URI: "https://A.example.com"}}}, // 重複
+		{Issuer: "https://as.example.com", Store: memory.New(), Keys: ks, Resources: []resource.Resource{{URI: "https://a.example.com", AccessTokenFormat: "paseto"}}},
 	}
 	for i, cfg := range bad {
 		if _, err := authengine.New(cfg); err == nil {

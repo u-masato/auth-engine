@@ -114,11 +114,15 @@ func (s *Store) TransitionTransaction(ctx context.Context, id string, from, to a
 	})
 }
 
-const codeColumns = `hash, txn_id, client_id, grant_id, family_id, subject, redirect_uri, redirect_uri_explicit, scopes,
+const codeColumns = `hash, txn_id, client_id, grant_id, family_id, subject, redirect_uri, redirect_uri_explicit, scopes, resource,
 	code_challenge, code_challenge_method, nonce, authenticated_at, amr, acr, claims, created_at, expires_at, consumed_at`
 
 func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization.AuthorizationCode) error {
 	scopes, err := mustJSON(code.Scopes)
+	if err != nil {
+		return err
+	}
+	res, err := toJSON(code.Resource) // 空なら NULL
 	if err != nil {
 		return err
 	}
@@ -139,9 +143,9 @@ func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization
 			return storage.ErrAlreadyExists
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO authorization_codes (`+codeColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			code.Hash, code.TxnID, code.ClientID, code.GrantID, code.FamilyID, code.Subject, code.RedirectURI,
-			boolInt(code.RedirectURIExplicit), scopes, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce,
+			boolInt(code.RedirectURIExplicit), scopes, res, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce,
 			nanos(code.AuthenticatedAt), amr, code.ACR, claims, mustNanos(code.CreatedAt), mustNanos(code.ExpiresAt), nanos(code.ConsumedAt))
 		return err
 	})
@@ -155,11 +159,11 @@ func scanCode(row rowScanner) (*authorization.AuthorizationCode, error) {
 	var (
 		c                        authorization.AuthorizationCode
 		explicit                 int
-		scopes, amr, claims      sql.NullString
+		scopes, res, amr, claims sql.NullString
 		authAt, created, expires sql.NullInt64
 		consumed                 sql.NullInt64
 	)
-	err := row.Scan(&c.Hash, &c.TxnID, &c.ClientID, &c.GrantID, &c.FamilyID, &c.Subject, &c.RedirectURI, &explicit, &scopes,
+	err := row.Scan(&c.Hash, &c.TxnID, &c.ClientID, &c.GrantID, &c.FamilyID, &c.Subject, &c.RedirectURI, &explicit, &scopes, &res,
 		&c.CodeChallenge, &c.CodeChallengeMethod, &c.Nonce, &authAt, &amr, &c.ACR, &claims, &created, &expires, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
@@ -169,6 +173,9 @@ func scanCode(row rowScanner) (*authorization.AuthorizationCode, error) {
 	}
 	c.RedirectURIExplicit = explicit == 1
 	if err := fromJSON(scopes, &c.Scopes); err != nil {
+		return nil, err
+	}
+	if err := fromJSON(res, &c.Resource); err != nil {
 		return nil, err
 	}
 	if err := fromJSON(amr, &c.AMR); err != nil {

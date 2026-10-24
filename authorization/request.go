@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/muno/auth-engine/client"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage"
 )
 
@@ -26,7 +27,7 @@ var multiValuedParams = map[string]bool{"resource": true}
 // 検証順序は RFC 6749 §4.1.2.1 の規則に従う。client_id と redirect_uri が確定するまでは
 // Client へリダイレクトできないので、その段階のエラーは RedirectURI を空にして返す。
 // それ以降のエラーは RedirectURI と state を持ち、Client へリダイレクトして返す。
-func parseRequest(ctx context.Context, clients client.Resolver, values url.Values) (*Request, *client.Client, *Error) {
+func parseRequest(ctx context.Context, clients client.Resolver, resources *resource.Set, values url.Values) (*Request, *client.Client, *Error) {
 	// --- 1. client_id（リダイレクト不可の段階） ---
 	if len(values["client_id"]) != 1 || values.Get("client_id") == "" {
 		return nil, nil, &Error{Code: CodeInvalidRequest, Description: "client_id is required exactly once"}
@@ -113,6 +114,13 @@ func parseRequest(ctx context.Context, clients client.Resolver, values url.Value
 		return fail(CodeInvalidRequest, "malformed code_challenge")
 	}
 
+	// resource（RFC 8707 §2.1）。設定済みで Client に許された Resource Server だけを受理する。
+	// Client と redirect_uri の検証は済んでいるので invalid_target はリダイレクトして返す（ADR-0008 §1）。
+	res, desc := parseResources(resources, c, values["resource"])
+	if desc != "" {
+		return fail(CodeInvalidTarget, desc)
+	}
+
 	// OIDC のヒント群。エンジンは構文だけ確認し、意味は Interaction App に委ねる。
 	req := &Request{
 		ClientID:            c.ID,
@@ -126,7 +134,7 @@ func parseRequest(ctx context.Context, clients client.Resolver, values url.Value
 		LoginHint:           values.Get("login_hint"),
 		UILocales:           values.Get("ui_locales"),
 		ACRValues:           values.Get("acr_values"),
-		Resource:            slices.Clone(values["resource"]),
+		Resource:            res,
 	}
 	if p := values.Get("prompt"); p != "" {
 		prompts := strings.Fields(p)
@@ -149,6 +157,42 @@ func parseRequest(ctx context.Context, clients client.Resolver, values url.Value
 		req.HasMaxAge = true
 	}
 	return req, c, nil
+}
+
+// parseResources は resource パラメータの各値を正規化し、設定（resources）と Client の許可範囲で
+// 検証して、重複を除いた正規形の一覧を返す。失敗なら invalid_target の説明文を返す。
+//
+//   - 値なし（resource=）は RFC 6749 §3.1 のとおり省略として扱う。
+//   - 構文違反・未設定・Client の許可範囲外は invalid_target（RFC 8707 §2、ADR-0008 §1〜§2）。
+//   - 複数の resource を要求するときは Access Token の形式が揃っていること（ADR-0008 §3）。
+//     1 つのトークンは 1 つの形式でしか発行できないため。
+func parseResources(resources *resource.Set, c *client.Client, raw []string) (uris []string, desc string) {
+	var format resource.Format
+	for _, v := range raw {
+		if v == "" {
+			continue
+		}
+		uri, err := resource.Normalize(v)
+		if err != nil {
+			return nil, "malformed resource: " + v
+		}
+		r, ok := resources.Lookup(uri)
+		if !ok {
+			return nil, "unknown resource: " + uri
+		}
+		if !c.AllowsResource(uri) {
+			return nil, "resource not allowed for this client: " + uri
+		}
+		if slices.Contains(uris, uri) {
+			continue
+		}
+		if len(uris) > 0 && r.EffectiveFormat() != format {
+			return nil, "requested resources use different access token formats"
+		}
+		format = r.EffectiveFormat()
+		uris = append(uris, uri)
+	}
+	return uris, ""
 }
 
 // parseScopes は空白区切りの scope を分解し、重複を除いて返す。

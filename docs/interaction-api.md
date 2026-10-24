@@ -82,6 +82,7 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 | `request.scopes` | クライアントが要求した scope。ユーザーはこの部分集合を承認できる |
 | `request.prompt` | OIDC の `prompt`。`none` を含むなら UI を出してはならない。ログイン状態がなければ `login_required` で Reject する。`login` は再認証、`consent` は同意画面の再表示を求めている |
 | `request.max_age` | 秒。認証がこれより古ければ再認証させる。満たさない `authenticated_at` を送るとエンジンが `invalid_outcome` で拒否する |
+| `request.resource` | RFC 8707 の `resource`（対象 Resource Server の URI、正規化済み）。エンジンが設定と Client の許可範囲で検証済みなので、同意画面では「このクライアントが <resource> へのアクセスを求めている」と表示に使える。要求になければ省略される |
 | `request.login_hint` 他 | 透過。エンジンは解釈しない |
 
 `completed` / `rejected` のときは `outcome` または `rejection` も返す（デバッグ用）。

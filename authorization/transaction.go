@@ -84,7 +84,8 @@ type Request struct {
 	UILocales string
 	ACRValues string
 
-	// Resource は RFC 8707 の resource パラメータ。M1 では保存のみで検証しない。
+	// Resource は RFC 8707 §2.1 の resource パラメータ。Engine の設定と Client の許可範囲で
+	// 検証済みで、resource.Normalize の正規形・重複なし。要求になければ空（ADR-0008 §2、§3）。
 	Resource []string
 }
 
@@ -129,6 +130,9 @@ type AuthorizationCode struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 	Nonce               string
+	// Resource は認可要求の resource をそのまま引き継いだもの（ADR-0008 §3）。
+	// Code 交換で発行する Access Token の Audience はこの部分集合になる（RFC 8707 §2.2）。
+	Resource []string
 
 	AuthenticatedAt time.Time
 	AMR             []string

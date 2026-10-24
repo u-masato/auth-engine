@@ -8,6 +8,8 @@
 //   - RFC 6749 §3.1 Authorization Endpoint、§4.1.1 Authorization Request、
 //     §4.1.2 Authorization Response、§4.1.2.1 Error Response
 //   - RFC 7636 §4.3 code_challenge の送信、§4.4 サーバー側の保持
+//   - RFC 8707 §2.1 認可要求の resource パラメータ（設定と Client の許可範囲で検証し、
+//     範囲外は invalid_target。Code に引き継ぐ）
 //   - RFC 9207 認可レスポンスの iss パラメータ
 //   - RFC 9700 §4.1 redirect_uri、§4.7 CSRF 対策（PKCE / state）
 //   - OIDC Core §3.1.2.1 Authentication Request（nonce, prompt, max_age, login_hint, ...）、

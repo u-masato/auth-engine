@@ -12,6 +12,7 @@ import (
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/oidc"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/token"
 )
 
@@ -33,6 +34,11 @@ type Config struct {
 	// Keys は ID Token の署名鍵セット。必須。RS256 の署名鍵を含むこと
 	// （OIDC Core §15.1、Client の既定アルゴリズム）。
 	Keys *keys.Set
+
+	// Resources は Resource Server（RFC 8707 の resource indicator）の静的設定（ADR-0008 §1）。
+	// 認可要求の resource はこの一覧にあるものだけを受理し、それ以外は invalid_target になる。
+	// 空なら resource 付きの要求はすべて invalid_target（意図したフェイルクローズ）。
+	Resources []resource.Resource
 
 	// Now は現在時刻の取得関数。nil なら time.Now。テストで固定時刻を注入する。
 	Now func() time.Time
@@ -59,6 +65,8 @@ type Engine struct {
 	Keys   *keys.Set
 	Logger *slog.Logger
 	Clock  clock.Clock
+	// Resources は検証・正規化済みの Resource Server 設定。
+	Resources *resource.Set
 
 	Authorization *authorization.Service
 	Token         *token.Service
@@ -104,6 +112,10 @@ func New(cfg Config) (*Engine, error) {
 	if _, err := cfg.Keys.SigningKey(keys.AlgRS256); err != nil {
 		return nil, errors.New("authengine: Keys must contain an RS256 signing key (OIDC Core §15.1)")
 	}
+	resources, err := resource.NewSet(cfg.Resources)
+	if err != nil {
+		return nil, fmt.Errorf("authengine: Resources: %w", err)
+	}
 
 	var clk clock.Clock = clock.Real{}
 	if cfg.Now != nil {
@@ -118,7 +130,7 @@ func New(cfg Config) (*Engine, error) {
 			"event", "config.insecure_issuer", "issuer", cfg.Issuer)
 	}
 
-	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk}
+	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk, Resources: resources}
 	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
 	e.UserInfo = &oidc.UserInfoService{Tokens: cfg.Store, Clock: clk}
 	e.Grants = &grant.Service{Store: cfg.Store, Clock: clk}
@@ -126,6 +138,7 @@ func New(cfg Config) (*Engine, error) {
 		Clients:        cfg.Store,
 		Store:          cfg.Store,
 		Grants:         cfg.Store,
+		Resources:      resources,
 		Clock:          clk,
 		Issuer:         cfg.Issuer,
 		TransactionTTL: cfg.TransactionTTL,

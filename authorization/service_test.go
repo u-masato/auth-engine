@@ -13,6 +13,7 @@ import (
 	"github.com/muno/auth-engine/client"
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage/memory"
 )
 
@@ -44,8 +45,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := store.CreateClient(context.Background(), web); err != nil {
 		t.Fatal(err)
 	}
+	resources, err := resource.NewSet([]resource.Resource{{URI: "https://api.example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &fixture{
-		svc:   &authorization.Service{Clients: store, Store: store, Grants: store, Clock: clk, Issuer: issuer},
+		svc:   &authorization.Service{Clients: store, Store: store, Grants: store, Resources: resources, Clock: clk, Issuer: issuer},
 		store: store, clock: clk, ctx: context.Background(),
 	}
 }
@@ -54,6 +59,7 @@ func params() url.Values {
 	return url.Values{
 		"response_type": {"code"}, "client_id": {"web"}, "redirect_uri": {"https://app.example.com/cb?env=prod"}, "scope": {"openid profile"}, "state": {"xyz"},
 		"code_challenge": {rfcChallenge}, "code_challenge_method": {"S256"}, "nonce": {"n1"}, "max_age": {"600"},
+		"resource": {"https://API.example.com"},
 	}
 }
 
@@ -86,7 +92,7 @@ func TestBegin(t *testing.T) {
 		t.Fatal("binding must be stored hashed")
 	}
 	stored, err := f.store.GetTransaction(f.ctx, txn.ID)
-	if err != nil || stored.Request.Nonce != "n1" {
+	if err != nil || stored.Request.Nonce != "n1" || !slices.Equal(stored.Request.Resource, []string{"https://api.example.com"}) {
 		t.Fatalf("stored: %+v, %v", stored, err)
 	}
 	if _, err := f.svc.Begin(f.ctx, params(), ""); err == nil {
@@ -108,6 +114,12 @@ func TestBeginProtocolErrors(t *testing.T) {
 	_, err = f.svc.Begin(f.ctx, p, binding)
 	if !errors.As(err, &perr) || !perr.Redirectable() || perr.Code != authorization.CodeInvalidRequest {
 		t.Fatalf("missing pkce: %v", err)
+	}
+	p = params()
+	p.Set("resource", "https://unknown.example.com")
+	_, err = f.svc.Begin(f.ctx, p, binding)
+	if !errors.As(err, &perr) || !perr.Redirectable() || perr.Code != authorization.CodeInvalidTarget {
+		t.Fatalf("unknown resource: %v", err)
 	}
 }
 
@@ -152,7 +164,7 @@ func TestCompleteThenResume(t *testing.T) {
 		t.Fatalf("redirect query: %s", redirect)
 	}
 
-	// Code は Hash で保存され、Grant・Family・PKCE・nonce を引き継いでいる
+	// Code は Hash で保存され、Grant・Family・PKCE・nonce・resource を引き継いでいる
 	code := q.Get("code")
 	ac, err := f.store.ConsumeAuthorizationCode(f.ctx, rand.Hash(code), f.clock.Now())
 	if err != nil {
@@ -161,7 +173,8 @@ func TestCompleteThenResume(t *testing.T) {
 	if ac.TxnID != txn.ID || ac.ClientID != "web" || ac.Subject != "alice" || ac.GrantID == "" || ac.FamilyID == "" ||
 		ac.CodeChallenge != rfcChallenge || ac.Nonce != "n1" || !slices.Equal(ac.Scopes, []string{"openid", "profile"}) ||
 		ac.RedirectURI != "https://app.example.com/cb?env=prod" || !ac.RedirectURIExplicit || ac.Claims["name"] != "Alice" ||
-		!slices.Equal(ac.AMR, []string{"pwd"}) || !ac.ExpiresAt.Equal(f.clock.Now().Add(authorization.DefaultCodeTTL)) {
+		!slices.Equal(ac.AMR, []string{"pwd"}) || !ac.ExpiresAt.Equal(f.clock.Now().Add(authorization.DefaultCodeTTL)) ||
+		!slices.Equal(ac.Resource, []string{"https://api.example.com"}) {
 		t.Fatalf("code: %+v", ac)
 	}
 	g, err := f.store.GetGrant(f.ctx, ac.GrantID)

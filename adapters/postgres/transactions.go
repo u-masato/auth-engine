@@ -102,11 +102,15 @@ func (s *Store) TransitionTransaction(ctx context.Context, id string, from, to a
 	return storage.ErrStateConflict
 }
 
-const codeColumns = `hash, txn_id, client_id, grant_id, family_id, subject, redirect_uri, redirect_uri_explicit, scopes,
+const codeColumns = `hash, txn_id, client_id, grant_id, family_id, subject, redirect_uri, redirect_uri_explicit, scopes, resource,
 	code_challenge, code_challenge_method, nonce, authenticated_at, amr, acr, claims, created_at, expires_at, consumed_at`
 
 func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization.AuthorizationCode) error {
 	scopes, err := mustJSON(code.Scopes)
+	if err != nil {
+		return err
+	}
+	res, err := toJSON(code.Resource) // 空なら NULL
 	if err != nil {
 		return err
 	}
@@ -119,20 +123,20 @@ func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization
 		return err
 	}
 	return insertOnce(ctx, s.db, `INSERT INTO authorization_codes (`+codeColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) ON CONFLICT (hash) DO NOTHING`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) ON CONFLICT (hash) DO NOTHING`,
 		code.Hash, code.TxnID, code.ClientID, code.GrantID, code.FamilyID, code.Subject, code.RedirectURI,
-		code.RedirectURIExplicit, scopes, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce,
+		code.RedirectURIExplicit, scopes, res, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce,
 		nanos(code.AuthenticatedAt), amr, code.ACR, claims, mustNanos(code.CreatedAt), mustNanos(code.ExpiresAt), nanos(code.ConsumedAt))
 }
 
 func scanCode(row rowScanner) (*authorization.AuthorizationCode, error) {
 	var (
 		c                                         authorization.AuthorizationCode
-		scopes, amr, claims                       sql.NullString
+		scopes, res, amr, claims                  sql.NullString
 		authenticated, created, expires, consumed sql.NullInt64
 	)
 	err := row.Scan(&c.Hash, &c.TxnID, &c.ClientID, &c.GrantID, &c.FamilyID, &c.Subject, &c.RedirectURI, &c.RedirectURIExplicit,
-		&scopes, &c.CodeChallenge, &c.CodeChallengeMethod, &c.Nonce, &authenticated, &amr, &c.ACR, &claims, &created, &expires, &consumed)
+		&scopes, &res, &c.CodeChallenge, &c.CodeChallengeMethod, &c.Nonce, &authenticated, &amr, &c.ACR, &claims, &created, &expires, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
 	}
@@ -142,7 +146,7 @@ func scanCode(row rowScanner) (*authorization.AuthorizationCode, error) {
 	for _, pair := range []struct {
 		src sql.NullString
 		dst any
-	}{{scopes, &c.Scopes}, {amr, &c.AMR}, {claims, &c.Claims}} {
+	}{{scopes, &c.Scopes}, {res, &c.Resource}, {amr, &c.AMR}, {claims, &c.Claims}} {
 		if err := fromJSON(pair.src, pair.dst); err != nil {
 			return nil, err
 		}

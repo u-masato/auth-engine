@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/resource"
 )
 
 // トークン有効期間の既定値と上限（ADR-0004 §2）。
@@ -49,6 +50,10 @@ type Client struct {
 	// Scopes はこのクライアントが要求できる scope の上限。
 	Scopes []string
 
+	// Resources はこのクライアントが要求できる resource（RFC 8707）の上限（ADR-0004 §2、ADR-0008 §2）。
+	// 空なら Engine に設定された全 resource を要求できる。値は resource.Normalize の正規形で保持する。
+	Resources []string
+
 	// SecretHash はクライアントシークレットの SHA-256（16 進）。public クライアントでは空。
 	SecretHash string
 
@@ -74,6 +79,7 @@ type WebParams struct {
 	Secret                 string
 	RedirectURIs           []string
 	Scopes                 []string
+	Resources              []string // 空なら制限なし
 	LogoURI                string
 	PolicyURI              string
 	AccessTokenTTL         time.Duration // 0 なら既定
@@ -87,6 +93,7 @@ type NativeParams struct {
 	Name                   string
 	RedirectURIs           []string
 	Scopes                 []string
+	Resources              []string // 空なら制限なし
 	LogoURI                string
 	PolicyURI              string
 	AccessTokenTTL         time.Duration
@@ -100,6 +107,7 @@ type MachineParams struct {
 	Name           string
 	Secret         string // 空なら生成（WebParams.Secret と同じ）
 	Scopes         []string
+	Resources      []string // 空なら制限なし
 	AccessTokenTTL time.Duration
 }
 
@@ -114,6 +122,7 @@ func NewWeb(p WebParams, now time.Time) (*Client, Secret, error) {
 		PolicyURI:              p.PolicyURI,
 		RedirectURIs:           slices.Clone(p.RedirectURIs),
 		Scopes:                 slices.Clone(p.Scopes),
+		Resources:              slices.Clone(p.Resources),
 		AccessTokenTTL:         p.AccessTokenTTL,
 		IDTokenAlg:             p.IDTokenAlg,
 		AllowInsecureLocalhost: p.AllowInsecureLocalhost,
@@ -136,6 +145,7 @@ func NewNative(p NativeParams, now time.Time) (*Client, error) {
 		PolicyURI:              p.PolicyURI,
 		RedirectURIs:           slices.Clone(p.RedirectURIs),
 		Scopes:                 slices.Clone(p.Scopes),
+		Resources:              slices.Clone(p.Resources),
 		AccessTokenTTL:         p.AccessTokenTTL,
 		IDTokenAlg:             p.IDTokenAlg,
 		AllowInsecureLocalhost: p.AllowInsecureLocalhost,
@@ -154,6 +164,7 @@ func NewMachine(p MachineParams, now time.Time) (*Client, Secret, error) {
 		Profile:        ProfileMachine,
 		Name:           p.Name,
 		Scopes:         slices.Clone(p.Scopes),
+		Resources:      slices.Clone(p.Resources),
 		AccessTokenTTL: p.AccessTokenTTL,
 		CreatedAt:      now,
 	}
@@ -181,6 +192,13 @@ func (c *Client) finish(presented string) (Secret, error) {
 	}
 	if r.issuesIDToken && c.IDTokenAlg == "" {
 		c.IDTokenAlg = AlgRS256
+	}
+	for i, res := range c.Resources {
+		n, err := resource.Normalize(res)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		c.Resources[i] = n
 	}
 
 	var secret Secret
@@ -226,6 +244,9 @@ func (c *Client) Validate() error {
 		return err
 	}
 	if err := validateRedirectURIs(r.redirect, c.RedirectURIs, c.AllowInsecureLocalhost); err != nil {
+		return err
+	}
+	if err := validateResources(c.Resources); err != nil {
 		return err
 	}
 

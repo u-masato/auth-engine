@@ -12,6 +12,7 @@ import (
 	"github.com/muno/auth-engine/grant"
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage"
 )
 
@@ -32,6 +33,10 @@ type Service struct {
 	Store   Store
 	Grants  grant.Store
 	Clock   clock.Clock
+
+	// Resources は認可要求の resource パラメータで指定できる Resource Server の集合（RFC 8707 §2.1）。
+	// nil なら空集合で、resource 付きの要求はすべて invalid_target になる。
+	Resources *resource.Set
 
 	// Issuer は認可サーバーの識別子（RFC 8414 の issuer）。認可応答の iss に使う（RFC 9207）。
 	Issuer string
@@ -63,7 +68,7 @@ func (s *Service) Begin(ctx context.Context, params url.Values, browserBinding s
 	if browserBinding == "" {
 		return nil, errors.New("authorization: browser binding is required")
 	}
-	req, _, perr := parseRequest(ctx, s.Clients, params)
+	req, _, perr := parseRequest(ctx, s.Clients, s.Resources, params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -275,6 +280,7 @@ func (s *Service) issueCode(ctx context.Context, txn *Transaction, now time.Time
 		CodeChallenge:       txn.Request.CodeChallenge,
 		CodeChallengeMethod: txn.Request.CodeChallengeMethod,
 		Nonce:               txn.Request.Nonce,
+		Resource:            txn.Request.Resource,
 		AuthenticatedAt:     out.AuthenticatedAt,
 		AMR:                 out.AMR,
 		ACR:                 out.ACR,

@@ -7,6 +7,7 @@
 //   - RFC 7636 PKCE（Profile が S256 を必須にする）
 //   - RFC 8252 §7.3 Loopback Interface Redirection（Native の port 無視照合）、
 //     §8.3 Loopback Redirect Considerations（localhost ではなく loopback IP リテラルを使う）
+//   - RFC 8707 §2 resource indicator（Client が要求できる resource の上限 Resources）
 //   - RFC 9700 §2.1.1 PKCE 必須、§4.1 redirect_uri の完全一致
 //
 // 利用者が選べるのは Profile（Web / Native / Machine）と、Profile が開放する項目だけである。

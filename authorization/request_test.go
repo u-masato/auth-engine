@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/muno/auth-engine/client"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage"
 )
 
@@ -39,7 +41,33 @@ func testClients(t *testing.T) fakeResolver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fakeResolver{"web": web, "cli": native, "svc": m2m}
+	// limited は resource の許可範囲を api.example.com に絞った Web Client
+	limited, _, err := client.NewWeb(client.WebParams{ID: "limited", Name: "Limited",
+		RedirectURIs: []string{"https://app.example.com/cb?env=prod"},
+		Scopes:       []string{"openid", "profile"}, Resources: []string{"https://api.example.com"}}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fakeResolver{"web": web, "cli": native, "svc": m2m, "limited": limited}
+}
+
+// testResources は Opaque 2 件と JWT 1 件の Resource Server 設定。
+func testResources(t *testing.T) *resource.Set {
+	t.Helper()
+	set, err := resource.NewSet([]resource.Resource{
+		{URI: "https://api.example.com"},
+		{URI: "https://mcp.example.com", Name: "MCP"},
+		{URI: "https://jwt.example.com", AccessTokenFormat: resource.FormatJWT},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return set
+}
+
+func parse(t *testing.T, clients fakeResolver, p url.Values) (*Request, *client.Client, *Error) {
+	t.Helper()
+	return parseRequest(context.Background(), clients, testResources(t), p)
 }
 
 func baseParams() url.Values {
@@ -60,9 +88,11 @@ func TestParseRequestSuccess(t *testing.T) {
 	p.Set("prompt", "login consent")
 	p.Set("max_age", "300")
 	p.Set("login_hint", "alice@example.com")
-	p.Add("resource", "https://api.example.com")
+	p.Add("resource", "https://API.example.com")
 	p.Add("resource", "https://mcp.example.com")
-	req, c, perr := parseRequest(context.Background(), testClients(t), p)
+	p.Add("resource", "https://api.example.com") // 正規形で重複
+	p.Add("resource", "")                        // 値なしは省略扱い（RFC 6749 §3.1）
+	req, c, perr := parse(t, testClients(t), p)
 	if perr != nil {
 		t.Fatal(perr)
 	}
@@ -79,7 +109,75 @@ func TestParseRequestSuccess(t *testing.T) {
 		t.Fatalf("hints: %+v", req)
 	}
 	if !slices.Equal(req.Resource, []string{"https://api.example.com", "https://mcp.example.com"}) {
-		t.Fatalf("resource: %+v", req.Resource)
+		t.Fatalf("resource must be normalized and deduplicated: %+v", req.Resource)
+	}
+}
+
+func TestParseRequestWithoutResource(t *testing.T) {
+	// resource なしの要求は従来どおり受理し、Resource は空（ADR-0008 §2）。設定が空でも同じ。
+	for _, set := range []*resource.Set{testResources(t), nil} {
+		req, _, perr := parseRequest(context.Background(), testClients(t), set, baseParams())
+		if perr != nil || len(req.Resource) != 0 {
+			t.Fatalf("resource-less request: %+v %v", req, perr)
+		}
+	}
+}
+
+func TestParseRequestResourceErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		mod  func(url.Values)
+		set  *resource.Set
+		desc string
+	}{
+		{"unknown", func(v url.Values) { v.Set("resource", "https://other.example.com") }, nil, "unknown resource"},
+		{"trailing slash differs", func(v url.Values) { v.Set("resource", "https://api.example.com/") }, nil, "unknown resource"},
+		{"relative", func(v url.Values) { v.Set("resource", "api.example.com") }, nil, "malformed resource"},
+		{"fragment", func(v url.Values) { v.Set("resource", "https://api.example.com#x") }, nil, "malformed resource"},
+		{"mixed formats", func(v url.Values) {
+			v.Add("resource", "https://api.example.com")
+			v.Add("resource", "https://jwt.example.com")
+		}, nil, "different access token formats"},
+		{"client restriction", func(v url.Values) { v.Set("client_id", "limited"); v.Set("resource", "https://mcp.example.com") }, nil, "not allowed for this client"},
+		{"one allowed one not", func(v url.Values) {
+			v.Set("client_id", "limited")
+			v.Add("resource", "https://api.example.com")
+			v.Add("resource", "https://mcp.example.com")
+		}, nil, "not allowed for this client"},
+		{"no resources configured", func(v url.Values) { v.Set("resource", "https://api.example.com") }, &resource.Set{}, "unknown resource"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := baseParams()
+			tt.mod(p)
+			set := tt.set
+			if set == nil {
+				set = testResources(t)
+			}
+			_, _, perr := parseRequest(context.Background(), testClients(t), set, p)
+			if perr == nil {
+				t.Fatal("want error")
+			}
+			if perr.Code != CodeInvalidTarget || !strings.Contains(perr.Description, tt.desc) {
+				t.Fatalf("got %s (%s), want invalid_target with %q", perr.Code, perr.Description, tt.desc)
+			}
+			// Client と redirect_uri は確定しているので、リダイレクトして返す（ADR-0008 §1）
+			if !perr.Redirectable() || perr.State != "xyz" {
+				t.Fatalf("invalid_target must be redirectable with state: %+v", perr)
+			}
+		})
+	}
+	// 許可範囲内なら limited でも通る。JWT の resource だけなら形式は揃っている
+	p := baseParams()
+	p.Set("client_id", "limited")
+	p.Set("resource", "https://api.example.com")
+	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+		t.Fatalf("allowed resource: %v", perr)
+	}
+	p = baseParams()
+	p.Set("resource", "https://jwt.example.com")
+	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+		t.Fatalf("single jwt resource: %v", perr)
 	}
 }
 
@@ -89,7 +187,7 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	p.Del("redirect_uri")
 	p.Set("scope", "openid  openid")
 	// OIDC（openid あり）では redirect_uri を省略できない。リダイレクト先が確定しないのでエラーページ
-	_, _, perr := parseRequest(context.Background(), testClients(t), p)
+	_, _, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Code != CodeInvalidRequest || perr.Redirectable() {
 		t.Fatalf("openid without redirect_uri must be a non-redirectable invalid_request: %v", perr)
 	}
@@ -102,7 +200,7 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	clients["plain"] = plain
 	p.Set("client_id", "plain")
 	p.Set("scope", "read  read")
-	req, _, perr := parseRequest(context.Background(), clients, p)
+	req, _, perr := parse(t, clients, p)
 	if perr != nil {
 		t.Fatal(perr)
 	}
@@ -130,7 +228,7 @@ func TestParseRequestNonRedirectableErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := baseParams()
 			tt.mod(p)
-			_, _, perr := parseRequest(context.Background(), testClients(t), p)
+			_, _, perr := parse(t, testClients(t), p)
 			if perr == nil {
 				t.Fatal("want error")
 			}
@@ -173,7 +271,7 @@ func TestParseRequestRedirectableErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := baseParams()
 			tt.mod(p)
-			_, _, perr := parseRequest(context.Background(), testClients(t), p)
+			_, _, perr := parse(t, testClients(t), p)
 			if perr == nil {
 				t.Fatal("want error")
 			}
@@ -203,7 +301,7 @@ func TestParseRequestMachineClientCannotAuthorize(t *testing.T) {
 	p := baseParams()
 	p.Set("client_id", "svc")
 	p.Set("scope", "api")
-	_, _, perr := parseRequest(context.Background(), testClients(t), p)
+	_, _, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Redirectable() {
 		t.Fatalf("machine client must fail without redirect: %+v", perr)
 	}
@@ -216,13 +314,13 @@ func TestParseRequestOpenIDRequiresIDTokenProfile(t *testing.T) {
 	p.Set("client_id", "cli")
 	p.Set("redirect_uri", "http://127.0.0.1:9999/cb")
 	p.Set("scope", "openid profile")
-	_, _, perr := parseRequest(context.Background(), testClients(t), p)
+	_, _, perr := parse(t, testClients(t), p)
 	if perr == nil || perr.Code != CodeInvalidScope {
 		t.Fatalf("want invalid_scope, got %+v", perr)
 	}
 	// loopback のポート違いは許される
 	p.Set("scope", "openid")
-	req, _, perr := parseRequest(context.Background(), testClients(t), p)
+	req, _, perr := parse(t, testClients(t), p)
 	if perr != nil || req.RedirectURI != "http://127.0.0.1:9999/cb" {
 		t.Fatalf("loopback port: %+v %v", req, perr)
 	}
