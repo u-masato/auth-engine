@@ -179,6 +179,12 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
   - JWT を選ぶ resource には、`AccessTokenTTL` の短い Client を組み合わせる。失効させても、ローカル検証では `exp` まで有効に見えるためである。
   - `Engine.New` は、JWT を選んだ resource の署名アルゴリズムに対応する鍵が `Keys` にあることを起動時に確かめる。ES256 を選ぶなら ES256 の署名鍵も用意する。
   - Resource Server は JWKS をキャッシュするので、鍵をローテーションするときは §6 の手順で旧鍵を残しておく。
+- **MCP サーバーなど、本リポジトリの Resource Server を Go で書くなら `resourceserver` パッケージを使う**（[ADR-0008](adr/0008-mcp-integration.md) §7）。例は [`resourceserver.ExampleNew`](../resourceserver/example_test.go)。
+  - `resourceserver.New` に自分の `Resource`（認可サーバーの `Config.Resources` と同じ URI）、`AuthorizationServers`（認可サーバーの Issuer）、`Verifier` を渡す。`MetadataHandler` を `MetadataPath()`（RFC 9728 の `/.well-known/oauth-protected-resource[/{path}]`）に mount し、保護したいルートを `Protect(handler, 必要な scope...)` で包む。
+  - `Verifier` は `IntrospectionVerifier`（Opaque / JWT 両方。Machine Profile の資格情報で `/introspect` を呼ぶ。失効が即時に伝わる）か `JWTVerifier`（JWT のみ。認可サーバーのメタデータから `jwks_uri` を得てローカル検証。失効は `exp` まで伝わらない）。どちらでも、ミドルウェアはトークンの `aud` に自分の resource が含まれることを必ず確認する。これを無効にする設定はない。
+  - 未提示・無効なトークンは 401、scope 不足は 403 で、`WWW-Authenticate` に `resource_metadata` と必要な scope を載せる（MCP クライアントはこれを見て認可サーバーを見つけ、足りない scope を要求し直す）。検証方式の障害（認可サーバーに到達できない）は 503。
+  - 検証済みの主体は `resourceserver.FromContext(r.Context())` で取り出す。scope の階層（広い scope が狭い scope を含む）はミドルウェアでは解釈しないので、ルートごとに必要な scope をそのまま与える。
+  - `resourceserver` は `Engine` や `httpapi` に依存しない。認可サーバーと別のプロセス・別のリポジトリから import してよい。
 - 管理画面やサポート対応からの失効には Go API を使う。トークンを 1 本だけ失効させるなら `engine.Token.RevokeToken`、ユーザーと Client の連携を解除するなら `engine.Grants.Revoke` を呼ぶ。例は [`token.ExampleService_RevokeToken`](../token/example_test.go) と [`grant.ExampleService_Revoke`](../grant/example_test.go)。
 
 ## 8. ログと監査

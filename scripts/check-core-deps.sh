@@ -17,4 +17,11 @@ if [ -n "$bad" ]; then
 	printf '  %s\n' $bad >&2
 	exit 1
 fi
+# resourceserver は Resource Server 側で動くので、認可サーバー側のパッケージ（ルートの Engine、httpapi）に依存しない（ADR-0008 §7）
+rsdeps=$($(command -v go) list -deps ./resourceserver | grep -E '^github.com/u-masato/auth-engine(/httpapi|/authorization|/token|/oidc|/grant|/client|/cimd|/storage.*)?$' || true)
+if [ -n "$rsdeps" ]; then
+	echo "resourceserver must not depend on authorization server packages:" >&2
+	printf '  %s\n' $rsdeps >&2
+	exit 1
+fi
 echo "core deps OK"
