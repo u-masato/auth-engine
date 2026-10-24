@@ -20,6 +20,10 @@
 //   - Client の登録: client.NewWeb / NewNative / NewMachine で作り、Store.CreateClient で登録する。
 //   - Interaction App: ログイン・同意画面。docs/interaction-api.md の契約に従って実装する。
 //
+// MCP 連携（docs/adr/0008-mcp-integration.md）を使うときは、さらに Config.Resources に
+// Resource Server（resource パッケージ）を列挙し、事前登録なしの MCP クライアントを受け入れるなら
+// Config.CIMD（cimd パッケージ）を与える。Resource Server 側には resourceserver パッケージを組み込む。
+//
 // New で Engine を組み立て、httpapi.New に渡すと、公開エンドポイント（PublicHandler）と
 // Interaction App 向けのバックチャネル（InteractionHandler）の 2 つの http.Handler が得られる。
 // 期限切れデータの削除（Store.Purge）は利用者のスケジューラから呼ぶ。

@@ -1,7 +1,7 @@
 # ADR-0007: パッケージ・モジュール構成
 
-- 状態: 採用（2026-10-24 合意）
-- 日付: 2026-10-24
+- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で `resource` `cimd` `resourceserver` を追加し、§4 の `client.Resolver` と `token.Issuer` を実体化（[ADR-0008](0008-mcp-integration.md)）
+- 日付: 2026-10-24（2026-10-25 更新）
 
 ## 文脈
 
@@ -36,9 +36,13 @@ auth-engine/
 ├── authorization/         # AuthorizationRequest の解析・検証、Transaction 状態機械、
 │                          # Begin/Complete/Reject/Resume、PKCE、Authorization Code 発行
 ├── grant/                 # Grant 集約（client×subject、scopes、claims スナップショット）、失効
-├── token/                 # Opaque Access/Refresh Token、Token Family、Rotation、Code 交換（/token）
+├── token/                 # Access Token（Opaque / JWT）・Refresh Token、Token Family、Rotation、Code 交換（/token）、
+│                          # Introspection、Revocation
 ├── oidc/                  # ID Token の組立と署名、Discovery メタデータ、UserInfo、scope→claims
 ├── keys/                  # 署名鍵セット（JWK）、ローテーション、go-jose の利用はここに閉じる
+├── resource/              # M3: Resource Server の静的設定と resource indicator の正規化（葉パッケージ）
+├── cimd/                  # M3: CIMD 文書の取得・検証・キャッシュ（client.Resolver 実装）。コアで唯一、外部へ HTTP 接続する
+├── resourceserver/        # M3: Resource Server 側に組み込むミドルウェア（RFC 9728、Bearer 検証）。Engine に依存しない
 ├── storage/               # 葉パッケージ。センチネルエラーだけを持ち、他のコアパッケージを import しない
 │   ├── memory/            # テスト用 In-Memory 実装（ルートの Store を実装）
 │   └── storagetest/       # Adapter 契約テスト（ルートの Store を検証）
@@ -50,6 +54,7 @@ auth-engine/
 │   ├── sqlite/            # 別モジュール: github.com/u-masato/auth-engine/adapters/sqlite
 │   └── postgres/          # 別モジュール（P2）
 ├── examples/standalone/   # 別モジュール: エンジン + デモ Interaction App（loginapp）+ サンプル Client（oauthclient）
+│                          # + 開発者コンソール（console）+ デモ MCP サーバー（mcp-server）+ CIMD 文書の配信（cimd-host）
 ├── docs/
 └── tests/                 # 別モジュール: E2E（SQLite + httptest + loginapp）。コアから Adapter を import できないため
 ```
@@ -93,13 +98,21 @@ authorization/
 ### 2. 依存の向き
 
 ```
-httpapi ──▶ authengine（ルート） ──▶ authorization, token, oidc, grant, client ──▶ storage（エラーのみ）, keys, internal/*
+httpapi ──▶ authengine（ルート） ──▶ authorization, token, oidc, grant, client, cimd ──▶ storage（エラーのみ）, resource, keys, internal/*
                  ▲
 adapters/sqlite ─┘（ルートの Store を実装。コアを import するがコアからは参照されない）
 storage/memory, storage/storagetest ──▶ authengine（ルート）
+
+resourceserver ──▶ keys, resource   （Resource Server 側。ルート・httpapi・authorization・token・cimd には依存しない）
 ```
 
-依存は一方向である。
+依存は一方向である。M3 で加えた 3 パッケージの位置:
+
+| パッケージ | 位置づけ |
+| --- | --- |
+| `resource` | `storage` と同じ葉パッケージ。`client` `authorization` `token` `resourceserver` が参照する |
+| `cimd` | `client.Resolver` の実装。`client` を import し、ルートが `client.ChainResolver{Store, cimd.Resolver}` に合成する。外部へ HTTP 接続するコアのコードはここだけ |
+| `resourceserver` | 認可サーバーではなく Resource Server 側で動く。ルートや `httpapi` に依存しないことを `scripts/check-core-deps.sh` で検査する（ADR-0008 §7）。別モジュールにしないのは、依存が標準ライブラリと `keys` `resource` だけで分離する理由がないため（§3 の判断基準） |
 
 | 向き | 内容 |
 | --- | --- |
@@ -162,8 +175,8 @@ Adapter は別パッケージなので非公開フィールドを読み書きで
 | インターフェース | P0 の実装 | 将来 |
 | --- | --- | --- |
 | `authengine.Store`（各文脈の `Store` の合成） | memory, sqlite | postgres |
-| `client.Resolver`（`client_id` → Client） | `Store` を使う実装 | CIMD（P1） |
-| `token.Issuer` | Opaque | JWT AT（P1） |
+| `client.Resolver`（`client_id` → Client） | `Store` を使う実装 | CIMD（P1）→ M3 で `cimd.Resolver` を追加し、`client.ChainResolver` で `Store` と合成 |
+| `token.Issuer` | Opaque | JWT AT（P1）→ M3 で `JWTIssuer` を追加し、`ByFormat` が resource の設定で選ぶ |
 | `httpapi.InteractionAuthenticator` | 事前共有 Bearer | mTLS 等 |
 | `httpapi.ErrorRenderer` | プレーン HTML | 利用者差し替え |
 | `clock.Clock` | 実時刻 | テスト用固定時刻 |
@@ -172,6 +185,6 @@ Adapter は別パッケージなので非公開フィールドを読み書きで
 
 ## 影響
 
-- パッケージ数はコアで 9（`internal` を含む）。読者は `authorization/` → `token/` → `oidc/` の順に読めばフローを追える。
+- パッケージ数はコアで P0 時点 9（`internal` を含む）、M3 で `resource` `cimd` `resourceserver` が加わり 12。読者は `authorization/` → `token/` → `oidc/` の順に読めばフローを追え、MCP 連携は `resource/` → `cimd/` → `resourceserver/` の順に読む。
 - `storage` パッケージは葉として小さく保つ。エラー以外のものを置きたくなったら、それは文脈パッケージかルートに属する。
 - 各パッケージの `doc.go` に「対応する RFC の節」を列挙する。

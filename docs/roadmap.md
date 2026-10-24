@@ -1,6 +1,6 @@
 # ロードマップと M1 の実装順序
 
-- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（Conformance Suite は実行したが、PKCE 必須のため Basic OP の大半は評価不能。[conformance.md](conformance.md)）
+- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（Conformance Suite は実行したが、PKCE 必須のため Basic OP の大半は評価不能。[conformance.md](conformance.md)）。**M3 は 2026-10-25 に完了**（MCP Inspector との相互運用は手動実行。[mcp-interop.md](mcp-interop.md)）
 - 日付: 2026-10-24
 
 準拠仕様の段階（P0〜P3）は [準拠仕様一覧](specifications.md) に従う。ここでは P0 を 2 つのマイルストーンに分け、M1 のタスク順序を決める。
@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | **M1** | Go ライブラリとして、SQLite だけで Authorization Code + PKCE を完走 | Web / Native Profile、Txn と Interaction API（ADR-0003）、Code 発行・交換、Opaque Access Token、SQLite Adapter、E2E テスト、最小の Discovery（RFC 8414） |
 | **M2** | OIDC 対応と運用に必要なトークンライフサイクル | ID Token、`/jwks`、`/userinfo`、OIDC Discovery、Refresh Token Rotation、Revocation、Introspection、M2M Profile（client_credentials）、PostgreSQL Adapter、Conformance Suite（Basic OP） |
-| M3（P1） | MCP 連携 | Resource Indicators、MCP Client Profile（CIMD）、JWT Access Token（任意）、Protected Resource Metadata 用ミドルウェア |
+| **M3**（P1） | MCP 連携 | Resource Indicators、MCP Client Profile（CIMD）、JWT Access Token（任意）、Protected Resource Metadata 用ミドルウェア |
 | M4（P2） | 高度な拡張 | Token Exchange、DPoP、PAR、private_key_jwt、RAR |
 
 技術スタック案の Phase 1〜4 との差分:
@@ -134,7 +134,9 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
 
 タスク 1〜3 は直列。4 は 1 と並行可能。5 は 1 と 4 の後。6 は 2〜3 の後（JWT 検証と Introspection の `aud` を使う）。7〜8 は 5〜6 の後。
 
-### M3 の実施結果（進行中）
+### M3 の実施結果（2026-10-25 完了）
+
+タスク 1〜9 を実施した。各タスクの差分と補足:
 
 - **タスク 1（2026-10-24 完了）**: `resource` パッケージ（`Resource` / `Format` / `Set`、`Normalize`）、`Config.Resources`、`Client.Resources`（全 Profile の `Params` に追加、正規形で保持）、認可要求の `resource` 検証（構文違反・未設定・Client の許可範囲外・形式不一致は `invalid_target`、リダイレクトして返す）、`Request.Resource` と `AuthorizationCode.Resource` の引き継ぎ、SQLite migration `00003` / PostgreSQL migration `00002`、`storagetest` の更新。計画との差分と補足:
   - `resource.Normalize` は RFC 8707 §2 の「絶対 URI」をそのまま採り、`https` に限定しない（`urn:` も受理する）。MCP は `https` を使うが、RFC 8707 自体は scheme を限定しないため。host を持たない `scheme:` だけの値は拒否する。
@@ -179,6 +181,9 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - Inspector の相互運用は Web UI ではなく CLI で行った（疑似 TTY と curl で自動承認のデモに対して無人で再現できる）。Web UI は未実施として文書に明記した。
   - `tests/e2e_test.go` に `newSystemWith`（`Config` の差し替え）と `registerMachine` を足した。
   - `demo.sh` の CIMD 文書は Inspector の CLI / TUI / Web のコールバックを既定で `redirect_uris` に含める（`DEMO_CIMD_REDIRECT_URIS`）。
+- **タスク 9（2026-10-25 完了）**: ADR-0008 を「実装済み」にし、計画からの差分を末尾の「実装結果」に節ごとに記録した。既存 ADR への追記: ADR-0001 §3（DCR は実装しない）、ADR-0004 §1 の Profile 表に MCP Client の列、§2 の開放項目に `Resources` と `ClientURI`、§4 に `NewMCP`、§6 を「MCP Client Profile（M3 で追加）」に書き換え。ADR-0005 §3（`GetClient` は `ChainResolver` の 1 実装）。ADR-0006 §1（JWT Access Token は resource ごとに選ぶ、`Issuer` の 3 実装、Audience）。ADR-0007 §1 / §2 / §4（`resource` `cimd` `resourceserver` の位置づけと依存、拡張点の実体化）。`docs/specifications.md` の P1 に状態列、README の状態と制約、`docs/embedding.md` の本番前チェック（`Resources` / CIMD / `aud`）、ルート `doc.go`。計画との差分と補足:
+  - `docs/interaction-api.md` の契約変更はタスク 5 で反映済みだったので、対象バージョンの表記だけを M3 に揃えた。
+  - 各パッケージの `doc.go` は実装タスクで都度更新しており、タスク 9 で追加したのはルートの `doc.go`（`Resources` / `CIMD` の案内）だけ。
 
 ### M3 で明示的に先送りするもの
 
