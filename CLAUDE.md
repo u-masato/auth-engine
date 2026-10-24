@@ -9,6 +9,7 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 - [docs/adr/0005-storage-port.md](docs/adr/0005-storage-port.md) / [0007-package-layout.md](docs/adr/0007-package-layout.md) — Store の契約と依存の向き
 - [docs/roadmap.md](docs/roadmap.md) — マイルストーンとタスク順序。作業はここの番号に沿って進める
 - [docs/interaction-api.md](docs/interaction-api.md) — Interaction App 向け公開仕様。HTTP の形を変えたらここも直す
+- [docs/embedding.md](docs/embedding.md) — 組み込む人向けの手順。`Config` や公開 API を変えたら、ここと各パッケージの `example_test.go` も直す
 
 ## モジュール構成（go.work で束ねる）
 

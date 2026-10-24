@@ -28,6 +28,15 @@ cd examples/standalone && go run ./cmd/cli-client
 
 詳細は [examples/standalone/README.md](examples/standalone/README.md)。
 
+## 組み込む
+
+自分のサービスに載せる手順（Store の選択、Client 登録、2 つの Handler の公開、鍵の保管、監査ログ、本番前の確認）は [組み込みガイド](docs/embedding.md) にまとめてある。コード例は各パッケージの `Example` テスト（`example_test.go`）にあり、`go test` で動作を確かめている。フロー全体を 1 プロセス内で通す例は [httpapi/example_test.go](httpapi/example_test.go) の `Example_authorizationCodeFlow`。
+
+```bash
+go doc -all github.com/muno/auth-engine/httpapi   # Example を含むパッケージ文書を端末で読む
+go test -run Example -v ./...                      # Example を実行する
+```
+
 ## モジュール構成
 
 | モジュール | 内容 | 外部依存 |
@@ -44,6 +53,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 
 - [設計ドキュメント索引](docs/README.md) — ADR と技術スタック案に対する判断の要約
 - [Interaction App との契約](docs/adr/0003-interaction-contract.md) — ヘッドレス構成の核心
+- [組み込みガイド](docs/embedding.md) — エンジンを自分のサービスに組み込む人向け
 - [Interaction API 仕様](docs/interaction-api.md) — Interaction App 実装者向け
 - [準拠仕様一覧](docs/specifications.md) — P0〜P3 の段階分け
 - [ロードマップ](docs/roadmap.md) — M1〜M4 とタスク順序、M1 / M2 の実施結果
