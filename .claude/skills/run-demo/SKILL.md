@@ -1,6 +1,6 @@
 ---
 name: run-demo
-description: auth-engine のデモサーバー（examples/standalone の server = エンジン + Interaction API + デモログイン画面）をバックグラウンドで起動・停止・確認し、cli-client で Authorization Code + PKCE のフローを回す。「デモ起動して」「サーバー立てて」「動かして見せて」「ログイン画面を見たい」「トークン取れるか試して」「ポートが使われてる」「DB をリセットして」など、このリポジトリのアプリを実際に動かす話が出たら、go run を手で打つ前に必ずこの skill を使う。/run からの起動もこの skill に従う。
+description: auth-engine のデモサーバー（examples/standalone の server = エンジン + Interaction API + デモログイン画面 + 開発者コンソール）をバックグラウンドで起動・停止・確認し、開発者コンソールや cli-client で Client 登録と Authorization Code + PKCE のフローを回す。「デモ起動して」「サーバー立てて」「動かして見せて」「ログイン画面を見たい」「トークン取れるか試して」「クライアントを登録したい」「ポートが使われてる」「DB をリセットして」など、このリポジトリのアプリを実際に動かす話が出たら、go run を手で打つ前に必ずこの skill を使う。/run からの起動もこの skill に従う。
 ---
 
 # デモサーバーの起動
@@ -10,7 +10,7 @@ description: auth-engine のデモサーバー（examples/standalone の server 
 
 - `go run` をバックグラウンドにすると子プロセスの PID が取れず止められなくなる。スクリプトは
   先に `go build` してバイナリを直接起動し、PID をファイルに残す。
-- 起動は 3 ポート（既定 8080 / 8081 / 8082）を同時に取る。空きを先に確認しないと、片方だけ
+- 起動は 4 ポート（既定 8080 / 8081 / 8082 / 8083）を同時に取る。空きを先に確認しないと、片方だけ
   取れて失敗した理由が分かりにくい。
 - DB・署名鍵・ログを `examples/standalone/.demo/`（gitignore 済み）に集めるので、作業ツリーを
   汚さず、`reset` で初期状態に戻せる。
@@ -31,9 +31,15 @@ $S reset                  # 停止して auth.db と keys.json を削除（次�
 
 `start` の残りの引数はそのまま server に渡る（`-clients ../../conformance/clients.json` など）。
 ポートを変えるときは `DEMO_PORT_BASE=8090 $S start` のように環境変数で指定する。
-公開 = base、Interaction API = base+1、ログイン画面 = base+2 で、issuer と login-url も追従する。
+公開 = base、Interaction API = base+1、ログイン画面 = base+2、開発者コンソール = base+3 で、issuer・login-url・console-url も追従する。
+コンソールで登録した Web Client の redirect URI はポート込みの完全一致なので、ポートを変えると使えなくなる。
 
 ## 判断のしかた
+
+**手動で確認したい人には開発者コンソール（`http://127.0.0.1:8083`）を案内する。** Client の登録
+（Web / Native / Machine）、認可要求の組み立て、コールバックでの state / iss 検証、Code 交換、
+ID Token の署名と claims の検証、UserInfo・Refresh・Revoke・Introspect が 1 画面で順に見られる。
+ブラウザペインがあればそこで開く。
 
 **何を求められているかで起動モードを選ぶ。**
 - 「動くか確かめて」「トークン取れるか」のように結果だけ欲しい → `start -auto-approve` して `flow`。
@@ -56,6 +62,7 @@ auto_approve が出る。クライアント登録や鍵の生成も起動ログ�
 
 起動したら、次をそのまま伝える。URL は貼れば開ける形にする。
 
+- 開発者コンソールの URL（手動確認の入口）
 - issuer と Discovery の URL、ログイン画面の URL
 - auto_approve の有無（true なら「誰でも demo-user として承認される」ことを一言添える）
 - ログファイルの場所と、止め方（`demo.sh stop`）

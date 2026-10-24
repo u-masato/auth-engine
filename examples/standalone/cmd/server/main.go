@@ -2,10 +2,11 @@
 //
 //	go run ./cmd/server -db ./auth.db
 //
-// 起動すると 3 つのリスナーが立つ。
+// 起動すると 4 つのリスナーが立つ。
 //   - 公開エンドポイント（既定 :8080）: /authorize, /token, /.well-known/oauth-authorization-server
 //   - Interaction API（既定 127.0.0.1:8081）: Interaction App だけが使う。外部に公開しない
 //   - デモ Interaction App（既定 :8082）: /login
+//   - 開発者コンソール（既定 127.0.0.1:8083）: Client の登録とフローの手動確認。-console-addr "" で無効
 //
 // 初回起動時にデモ用クライアント demo-cli（Native、loopback redirect）を登録する。
 // cmd/cli-client がこのクライアントでフローを実行できる。
@@ -30,6 +31,7 @@ import (
 	authengine "github.com/muno/auth-engine"
 	"github.com/muno/auth-engine/adapters/sqlite"
 	"github.com/muno/auth-engine/client"
+	"github.com/muno/auth-engine/examples/standalone/console"
 	"github.com/muno/auth-engine/examples/standalone/loginapp"
 	"github.com/muno/auth-engine/httpapi"
 	"github.com/muno/auth-engine/keys"
@@ -48,6 +50,8 @@ func main() {
 		autoApprove     = flag.Bool("auto-approve", false, "approve every request as demo-user without showing a form (tests only)")
 		clientsPath     = flag.String("clients", "", "JSON file of clients to register on startup (see conformance/clients.json)")
 		insecureIssuer  = flag.Bool("allow-insecure-issuer", false, "allow an http issuer other than localhost (e.g. http://host.docker.internal:8080; local development only)")
+		consoleAddr     = flag.String("console-addr", "127.0.0.1:8083", "listen address for the developer console (empty to disable; it writes to the store without authentication, so keep it on loopback)")
+		consoleURL      = flag.String("console-url", "http://127.0.0.1:8083", "public URL of the developer console (its redirect URI is this + /callback)")
 	)
 	flag.Parse()
 
@@ -55,6 +59,7 @@ func main() {
 	if err := run(context.Background(), logger, options{
 		dbPath: *dbPath, keysPath: *keysPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
 		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove, clientsPath: *clientsPath, insecureIssuer: *insecureIssuer,
+		consoleAddr: *consoleAddr, consoleURL: *consoleURL,
 	}); err != nil {
 		logger.Error("server exited", "error", err)
 		os.Exit(1)
@@ -62,8 +67,8 @@ func main() {
 }
 
 type options struct {
-	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL, clientsPath string
-	autoApprove, insecureIssuer                                                             bool
+	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL, clientsPath, consoleAddr, consoleURL string
+	autoApprove, insecureIssuer                                                                                      bool
 }
 
 func run(ctx context.Context, logger *slog.Logger, o options) error {
@@ -84,13 +89,16 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	if err != nil {
 		return err
 	}
-	if err := registerDemoClients(ctx, store, logger); err != nil {
+	known, err := registerDemoClients(ctx, store, logger)
+	if err != nil {
 		return err
 	}
 	if o.clientsPath != "" {
-		if err := registerClientsFromFile(ctx, store, logger, o.clientsPath); err != nil {
+		fromFile, err := registerClientsFromFile(ctx, store, logger, o.clientsPath)
+		if err != nil {
 			return err
 		}
+		known = append(known, fromFile...)
 	}
 
 	// Interaction API のトークンはプロセス内で生成し、同梱の loginapp にだけ渡す。
@@ -124,6 +132,14 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 		{Addr: o.loginAddr, Handler: login.Handler(), ReadHeaderTimeout: 5 * time.Second},
 	}
 	names := []string{"public", "interaction", "login"}
+	if o.consoleAddr != "" {
+		con, err := console.New(console.Config{Issuer: o.issuer, BaseURL: o.consoleURL, Store: store, Known: known, Logger: logger})
+		if err != nil {
+			return err
+		}
+		servers = append(servers, &http.Server{Addr: o.consoleAddr, Handler: con.Handler(), ReadHeaderTimeout: 5 * time.Second})
+		names = append(names, "console")
+	}
 	errCh := make(chan error, len(servers))
 	for i, s := range servers {
 		ln, err := net.Listen("tcp", s.Addr)
@@ -137,7 +153,7 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 			}
 		}(s, ln)
 	}
-	logger.Info("ready", "issuer", o.issuer, "login_url", o.loginURL, "auto_approve", o.autoApprove)
+	logger.Info("ready", "issuer", o.issuer, "login_url", o.loginURL, "console_url", o.consoleURL, "auto_approve", o.autoApprove)
 
 	select {
 	case <-ctx.Done():
@@ -152,13 +168,14 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	return nil
 }
 
-// registerDemoClients はデモ用の Native クライアントを初回だけ登録する。
-func registerDemoClients(ctx context.Context, store authengine.Store, logger *slog.Logger) error {
+// registerDemoClients はデモ用の Native クライアントを初回だけ登録し、コンソールに出す一覧を返す。
+func registerDemoClients(ctx context.Context, store authengine.Store, logger *slog.Logger) ([]console.KnownClient, error) {
 	const id = "demo-cli"
+	known := []console.KnownClient{{ID: id}}
 	if _, err := store.GetClient(ctx, id); err == nil {
-		return nil
+		return known, nil
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		return err
+		return nil, err
 	}
 	c, err := client.NewNative(client.NativeParams{
 		ID:           id,
@@ -167,13 +184,13 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 		Scopes:       []string{"openid", "profile", "email"},
 	}, time.Now())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := store.CreateClient(ctx, c); err != nil {
-		return err
+		return nil, err
 	}
 	logger.Info("registered demo client", "client_id", id, "profile", c.Profile)
-	return nil
+	return known, nil
 }
 
 // clientSpec は -clients で読むクライアント定義。
@@ -188,24 +205,26 @@ type clientSpec struct {
 	AllowInsecureLocalhost bool     `json:"allow_insecure_localhost"`
 }
 
-// registerClientsFromFile は JSON ファイルのクライアントを登録する。既に同じ client_id があれば
-// 変更せずに飛ばす（Store に更新操作はない。変えたいときは DB を作り直す）。
-func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) error {
+// registerClientsFromFile は JSON ファイルのクライアントを登録し、コンソールに出す一覧を返す。
+// 既に同じ client_id があれば変更せずに飛ばす（Store に更新操作はない。変えたいときは DB を作り直す）。
+func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) ([]console.KnownClient, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read clients %s: %w", path, err)
+		return nil, fmt.Errorf("read clients %s: %w", path, err)
 	}
 	var specs []clientSpec
 	if err := json.Unmarshal(data, &specs); err != nil {
-		return fmt.Errorf("parse clients %s: %w", path, err)
+		return nil, fmt.Errorf("parse clients %s: %w", path, err)
 	}
 	now := time.Now()
+	var known []console.KnownClient
 	for _, sp := range specs {
 		if _, err := store.GetClient(ctx, sp.ClientID); err == nil {
 			logger.Info("client already registered", "client_id", sp.ClientID)
+			known = append(known, console.KnownClient{ID: sp.ClientID, Secret: sp.Secret})
 			continue
 		} else if !errors.Is(err, storage.ErrNotFound) {
-			return err
+			return nil, err
 		}
 		var (
 			c      *client.Client
@@ -221,21 +240,22 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 		case client.ProfileMachine:
 			c, secret, err = client.NewMachine(client.MachineParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, Scopes: sp.Scopes}, now)
 		default:
-			return fmt.Errorf("client %s: unknown profile %q", sp.ClientID, sp.Profile)
+			return nil, fmt.Errorf("client %s: unknown profile %q", sp.ClientID, sp.Profile)
 		}
 		if err != nil {
-			return fmt.Errorf("client %s: %w", sp.ClientID, err)
+			return nil, fmt.Errorf("client %s: %w", sp.ClientID, err)
 		}
 		if err := store.CreateClient(ctx, c); err != nil {
-			return fmt.Errorf("client %s: %w", sp.ClientID, err)
+			return nil, fmt.Errorf("client %s: %w", sp.ClientID, err)
 		}
 		attrs := []any{"client_id", c.ID, "profile", c.Profile}
 		if secret != "" && sp.Secret == "" {
 			attrs = append(attrs, "generated_secret", string(secret)) // 1 回しか得られないので表示する
 		}
 		logger.Info("registered client from file", attrs...)
+		known = append(known, console.KnownClient{ID: c.ID, Secret: string(secret)})
 	}
-	return nil
+	return known, nil
 }
 
 // loadOrCreateKeys は鍵セットをファイルから読み、なければ RS256 と ES256 の鍵を生成して保存する。

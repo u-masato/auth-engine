@@ -1,7 +1,7 @@
 // Package oauthclient は、エンジンに対して Authorization Code + PKCE を実行する
 // 最小限の OAuth 2.0 クライアントである。サンプル CLI と E2E テストで使う。
 //
-// 対応する仕様: RFC 6749 §4.1 / §6、RFC 7009、RFC 7636（S256）、RFC 8252 §7.3（loopback redirect）、
+// 対応する仕様: RFC 6749 §4.1 / §4.4 / §6、RFC 7009、RFC 7636（S256）、RFC 7662、RFC 8252 §7.3（loopback redirect）、
 // RFC 8414（メタデータ取得）、RFC 9207（iss の検証）、OIDC Core §5.3（UserInfo）。
 package oauthclient
 
@@ -65,6 +65,9 @@ type CodeFlow struct {
 	RedirectURI  string
 	Scopes       []string
 	HTTPClient   *http.Client
+	// Extra は認可要求に足すパラメータ（nonce、prompt、login_hint、max_age など）。
+	// response_type や PKCE のように CodeFlow が決めるパラメータは上書きできない。
+	Extra url.Values
 
 	state    string
 	verifier string
@@ -104,8 +107,16 @@ func (f *CodeFlow) AuthorizationURL() string {
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
 	}
+	for k, v := range f.Extra {
+		if _, ok := q[k]; !ok {
+			q[k] = v
+		}
+	}
 	return f.Metadata.AuthorizationEndpoint + "?" + q.Encode()
 }
+
+// State はこのフローの state を返す。コールバックを受ける側がフローを引き当てるのに使う。
+func (f *CodeFlow) State() string { return f.state }
 
 // AuthorizationError は認可サーバーがエラー応答を返したことを表す。
 type AuthorizationError struct {
@@ -195,6 +206,44 @@ func (f *CodeFlow) Revoke(ctx context.Context, token, hint string) error {
 		return terr
 	}
 	return nil
+}
+
+// ClientCredentials は Client Credentials Grant でトークンを得る（RFC 6749 §4.4）。
+// Machine Profile 用で、state・PKCE・RedirectURI は使わない。scope は空なら省略。
+func (f *CodeFlow) ClientCredentials(ctx context.Context, scope string) (*TokenResponse, error) {
+	form := url.Values{"grant_type": {"client_credentials"}}
+	if scope != "" {
+		form.Set("scope", scope)
+	}
+	return f.tokenRequest(ctx, form)
+}
+
+// Introspect はトークンの状態を問い合わせる（RFC 7662 §2）。confidential クライアントだけが呼べる。
+// 応答は §2.2 の JSON をそのまま返す。
+func (f *CodeFlow) Introspect(ctx context.Context, token, hint string) (map[string]any, error) {
+	form := url.Values{"token": {token}}
+	if hint != "" {
+		form.Set("token_type_hint", hint)
+	}
+	res, err := f.HTTPClient.Do(f.formRequest(ctx, f.Metadata.IntrospectionEndpoint, form))
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		terr := &TokenError{Status: res.StatusCode}
+		_ = json.Unmarshal(body, terr)
+		return nil, terr
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // UserInfo は Access Token で UserInfo エンドポイントを呼ぶ（OIDC Core §5.3）。

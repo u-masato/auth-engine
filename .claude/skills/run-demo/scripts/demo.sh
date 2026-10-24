@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# examples/standalone のデモサーバー（エンジン + Interaction API + デモ Interaction App）を
+# examples/standalone のデモサーバー（エンジン + Interaction API + デモ Interaction App + 開発者コンソール）を
 # バックグラウンドで起動・停止・確認し、cli-client で Authorization Code + PKCE を回す。
 #
 #   demo.sh start [-auto-approve] [server の追加フラグ...]
@@ -7,7 +7,7 @@
 #   demo.sh flow [-scope "openid profile"]   # 認可フローを実行（-auto-approve 起動なら全自動）
 #   demo.sh flow-wait                        # ブラウザ承認後の結果を表示
 #
-# 環境変数: DEMO_PORT_BASE（既定 8080。公開=base, Interaction=base+1, login=base+2）
+# 環境変数: DEMO_PORT_BASE（既定 8080。公開=base, Interaction=base+1, login=base+2, console=base+3）
 #           DEMO_DIR（既定 examples/standalone/.demo。DB・鍵・ログ・PID をここに置く）
 set -euo pipefail
 
@@ -17,6 +17,7 @@ PORT_BASE="${DEMO_PORT_BASE:-8080}"
 PUBLIC_PORT=$PORT_BASE
 INTERACTION_PORT=$((PORT_BASE + 1))
 LOGIN_PORT=$((PORT_BASE + 2))
+CONSOLE_PORT=$((PORT_BASE + 3))
 DEMO_DIR="${DEMO_DIR:-$APP/.demo}"
 PID_FILE="$DEMO_DIR/server.pid"
 LOG="$DEMO_DIR/server.log"
@@ -26,6 +27,10 @@ FLOW_OUT="$DEMO_DIR/flow.out"
 FLOW_PID="$DEMO_DIR/flow.pid"
 ISSUER="http://localhost:$PUBLIC_PORT"
 LOGIN_URL="http://localhost:$LOGIN_PORT/login"
+# コンソールは認証なしで Store に書き込むので loopback にだけ bind する。localhost ではなく 127.0.0.1 に
+# するのは、Cookie がポートを区別せず :8080 / :8082 と混ざるのを避けるためと、Native の loopback
+# redirect（RFC 8252 §7.3）にそのまま使えるようにするため。
+CONSOLE_URL="http://127.0.0.1:$CONSOLE_PORT"
 
 # GOROOT が別バージョンの SDK を指していると go build が "version does not match" で失敗する
 # （この Mac では .zshrc の GOROOT=go1.26.10 と PATH 先頭の go1.26.3 が食い違うことがある）。
@@ -50,6 +55,7 @@ auto_approve_on() { grep -q 'msg=ready.*auto_approve=true' "$LOG" 2>/dev/null; }
 print_summary() {
   echo "issuer:            $ISSUER"
   echo "discovery:         $ISSUER/.well-known/openid-configuration"
+  echo "console:           $CONSOLE_URL  (Client 登録とフローの手動確認はここから)"
   echo "login (demo app):  $LOGIN_URL"
   echo "interaction api:   http://127.0.0.1:$INTERACTION_PORT (loginapp 専用。外部に出さない)"
   echo "auto_approve:      $(auto_approve_on && echo true || echo false)"
@@ -64,7 +70,7 @@ cmd_start() {
   fi
   rm -f "$PID_FILE"
   local busy=0 p
-  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT"; do
+  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT"; do
     local u; u=$(port_users "$p")
     if [ -n "$u" ]; then echo "port $p is in use by: $u"; busy=1; fi
   done
@@ -80,6 +86,7 @@ cmd_start() {
     -issuer "$ISSUER" -public-addr ":$PUBLIC_PORT" \
     -interaction-addr "127.0.0.1:$INTERACTION_PORT" \
     -login-addr ":$LOGIN_PORT" -login-url "$LOGIN_URL" \
+    -console-addr "127.0.0.1:$CONSOLE_PORT" -console-url "$CONSOLE_URL" \
     "$@" >"$LOG" 2>&1 &
   echo $! >"$PID_FILE"
   local i
@@ -119,7 +126,7 @@ cmd_status() {
   fi
   echo "not running"
   local p
-  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT"; do
+  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT"; do
     local u; u=$(port_users "$p"); [ -n "$u" ] && echo "port $p is in use by: $u (このスクリプトが起動したものではない)"
   done
   return 0

@@ -1,0 +1,187 @@
+{{define "head"}}<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.}} · auth-engine console</title>
+<style>
+:root{--fg:#1d1d1f;--muted:#6e6e73;--line:#d2d2d7;--bg:#fff;--panel:#f5f5f7;--ok:#1a7f37;--ng:#cf222e;--accent:#0a5bd3}
+body{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:64rem;margin:0 auto;padding:1rem 1rem 4rem;line-height:1.5}
+header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem;border-bottom:1px solid var(--line);margin-bottom:1rem}
+header a{color:inherit;text-decoration:none;font-weight:600}
+h2{margin-top:2rem;font-size:1.15rem}h3{font-size:1rem;margin:0}
+small,.muted{color:var(--muted)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}
+pre{background:var(--panel);padding:.75rem;border-radius:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin:.5rem 0}
+table{border-collapse:collapse;width:100%;margin:.5rem 0}
+th,td{border-bottom:1px solid var(--line);padding:.35rem .5rem;text-align:left;vertical-align:top}
+th{font-weight:600;white-space:nowrap}
+td code{word-break:break-all}
+.panel{background:var(--panel);border-radius:8px;padding:1rem;margin:1rem 0}
+.step{border:1px solid var(--line);border-radius:8px;padding:.75rem 1rem;margin:1rem 0}
+.step header{border:0;margin:0}
+.ok{color:var(--ok)}.ng{color:var(--ng)}
+.error{border-left:4px solid var(--ng);background:#fff0f0;padding:.5rem .75rem;margin:1rem 0}
+.note{border-left:4px solid var(--accent);background:#eef4ff;padding:.5rem .75rem;margin:1rem 0}
+label{display:block;margin:.5rem 0}
+input[type=text],input[type=password],select,textarea{font:inherit;padding:.3rem .4rem;width:100%;box-sizing:border-box}
+textarea{min-height:3.5rem}
+button,.button{font:inherit;padding:.35rem .9rem;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;text-decoration:none;display:inline-block}
+button.secondary{background:#fff;color:var(--accent)}
+button:disabled{opacity:.4;cursor:not-allowed}
+form.inline{display:inline}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:0 1rem}
+</style></head>
+<body>
+<header><a href="/">auth-engine 開発者コンソール</a><small>デモ専用。127.0.0.1 からのみ使う</small></header>
+{{end}}
+
+{{define "foot"}}</body></html>{{end}}
+
+{{define "error"}}{{template "head" "エラー"}}
+<div class="error">{{.Message}}</div>
+<p><a href="/">← トップへ</a></p>
+{{template "foot"}}{{end}}
+
+{{define "index"}}{{template "head" "トップ"}}
+<table>
+<tr><th>Issuer</th><td><code>{{.Issuer}}</code>（<a href="{{.Issuer}}/.well-known/openid-configuration" target="_blank">Discovery</a>）</td></tr>
+<tr><th>コンソールの redirect URI</th><td><code>{{.RedirectURI}}</code></td></tr>
+</table>
+
+<h2>登録済みクライアント</h2>
+<p class="muted">Store に一覧の操作はないので、起動時に登録したものとこのコンソールで登録・使用したものだけを出す。</p>
+<table>
+<tr><th>client_id</th><th>Profile</th><th>redirect URI</th><th>scope</th><th></th></tr>
+{{range .Clients}}<tr>
+  <td><a href="/clients/{{.ID}}"><code>{{.ID}}</code></a>{{with .Client}}<br><small>{{.Name}}</small>{{end}}</td>
+  {{if .Client}}
+  <td>{{.Client.Profile}}</td>
+  <td>{{range .Client.RedirectURIs}}<code>{{.}}</code><br>{{else}}<span class="muted">なし</span>{{end}}</td>
+  <td>{{join .Client.Scopes " "}}</td>
+  <td>{{if .Usable}}<a class="button" href="/clients/{{.ID}}">試す</a>{{else}}<small class="ng">コンソールの redirect URI が未登録</small>{{end}}</td>
+  {{else}}<td colspan="4" class="ng">{{.Err}}</td>{{end}}
+</tr>{{else}}<tr><td colspan="5" class="muted">まだない</td></tr>{{end}}
+</table>
+
+<h2>クライアントを登録する</h2>
+{{with .Error}}<div class="error">{{.}}</div>{{end}}
+<form method="post" action="/clients" class="panel">
+  <div class="grid">
+    <label>Profile <small>（docs/adr/0004）</small>
+      <select name="profile">
+        <option value="web" {{if eq .Form.Profile "web"}}selected{{end}}>web — confidential、Code + PKCE</option>
+        <option value="native" {{if eq .Form.Profile "native"}}selected{{end}}>native — public、Code + PKCE</option>
+        <option value="machine" {{if eq .Form.Profile "machine"}}selected{{end}}>machine — confidential、client_credentials</option>
+      </select></label>
+    <label>client_id <small>（空なら生成）</small><input type="text" name="client_id" value="{{.Form.ClientID}}"></label>
+    <label>名前<input type="text" name="name" value="{{.Form.Name}}" required></label>
+    <label>ID Token の署名アルゴリズム
+      <select name="id_token_alg">
+        <option {{if eq .Form.IDTokenAlg "RS256"}}selected{{end}}>RS256</option>
+        <option {{if eq .Form.IDTokenAlg "ES256"}}selected{{end}}>ES256</option>
+      </select></label>
+  </div>
+  <label>redirect URI <small>（改行区切り。machine では使わない）</small><textarea name="redirect_uris">{{.Form.RedirectURIs}}</textarea></label>
+  <label>scope <small>（空白区切り。machine は openid を持てない。例: api.read）</small><input type="text" name="scopes" value="{{.Form.Scopes}}"></label>
+  <label><input type="checkbox" name="allow_insecure_localhost" {{if .Form.AllowInsecureLocalhost}}checked{{end}}>
+    http の localhost / loopback を許す（開発用の緩和。web でコンソールの redirect URI を使うには必要）</label>
+  <button>登録する</button>
+</form>
+
+<h2>client_id を指定してフローを開始する</h2>
+<p class="muted">一覧にない Client（コンソールの再起動前に登録したもの、<code>-clients</code> で Secret を生成させたもの）はここから。</p>
+<form method="post" action="/flows" class="panel">
+  <div class="grid">
+    <label>client_id<input type="text" name="client_id" required></label>
+    <label>Client Secret <small>（native は空）</small><input type="password" name="secret" autocomplete="off"></label>
+    <label>scope<input type="text" name="scope" value="openid profile"></label>
+  </div>
+  <button>開始</button>
+</form>
+
+<h2>フローの履歴</h2>
+<table>
+<tr><th>開始</th><th>client_id</th><th>Profile</th><th>最後の段階</th></tr>
+{{range .Flows}}<tr>
+  <td><a href="/flows/{{.ID}}">{{.Created.Format "15:04:05"}}</a></td><td><code>{{.ClientID}}</code></td><td>{{.Profile}}</td>
+  <td>{{if .Last}}{{.Last}}{{else}}<span class="muted">認可要求の前</span>{{end}}{{if .Failed}} <span class="ng">失敗</span>{{end}}</td>
+</tr>{{else}}<tr><td colspan="4" class="muted">まだない</td></tr>{{end}}
+</table>
+{{template "foot"}}{{end}}
+
+{{define "client"}}{{template "head" .View.ID}}
+{{$c := .View.Client}}
+<h2>{{$c.Name}} <small><code>{{$c.ID}}</code></small></h2>
+<table>
+<tr><th>Profile</th><td>{{$c.Profile}}{{if native $c.Profile}}（public）{{else}}（confidential）{{end}}</td></tr>
+<tr><th>redirect URI</th><td>{{range $c.RedirectURIs}}<code>{{.}}</code><br>{{else}}<span class="muted">なし</span>{{end}}</td></tr>
+<tr><th>scope</th><td>{{join $c.Scopes " "}}</td></tr>
+{{with $c.IDTokenAlg}}<tr><th>ID Token</th><td>{{.}}</td></tr>{{end}}
+<tr><th>開発用の緩和</th><td>{{if $c.AllowInsecureLocalhost}}http の localhost / loopback を許可{{else}}なし{{end}}</td></tr>
+{{if not (native $c.Profile)}}<tr><th>Client Secret</th><td>
+  {{if .View.Secret}}<code>{{.View.Secret}}</code><br><small>Store にはハッシュだけを保存する。この値はコンソールのメモリにだけあり、再起動すると消える。</small>
+  {{else}}<span class="muted">コンソールは知らない。下のフォームに入れる</span>{{end}}</td></tr>{{end}}
+</table>
+{{if .View.Generated}}<div class="note">登録した。Client Secret は生成時にしか平文で得られない（Store はハッシュだけを持つ）ので、必要なら控えておく。</div>{{end}}
+
+<h2>フローを開始する</h2>
+{{if not .View.Usable}}<div class="error">この Client の redirect URI にコンソールの <code>{{.RedirectURI}}</code> がない。認可要求は redirect URI の不一致で拒否される（RFC 6749 §3.1.2.4）。それを確かめたいのでなければ、コンソールの redirect URI を含めて別の client_id で登録し直す。</div>{{end}}
+<form method="post" action="/flows" class="panel">
+  <input type="hidden" name="client_id" value="{{$c.ID}}">
+  <div class="grid">
+    {{if not (native $c.Profile)}}<label>Client Secret<input type="password" name="secret" value="{{.View.Secret}}" autocomplete="off" required></label>{{end}}
+    <label>scope<input type="text" name="scope" value="{{.Scope}}"></label>
+    {{if ne (printf "%s" $c.Profile) "machine"}}
+    <label>prompt <small>（OIDC Core §3.1.2.1）</small>
+      <select name="prompt">
+        <option value="">（指定しない）</option>
+        <option value="login">login — ログイン画面を必ず出す</option>
+        <option value="consent">consent — 同意画面を必ず出す</option>
+        <option value="none">none — 画面を出さない（未ログインなら login_required）</option>
+      </select></label>
+    <label>login_hint<input type="text" name="login_hint"></label>
+    <label>max_age <small>（秒）</small><input type="text" name="max_age" inputmode="numeric"></label>
+    {{end}}
+  </div>
+  {{if eq (printf "%s" $c.Profile) "machine"}}<button>client_credentials でトークンを取る</button>
+  {{else}}<p class="muted">ログイン画面（:8082）は Cookie セッションを持つ。2 回目以降に画面を見たいときは prompt=login にする。</p><button>認可要求を組み立てる</button>{{end}}
+</form>
+{{template "foot"}}{{end}}
+
+{{define "flow"}}{{template "head" "フロー"}}
+{{$f := .Flow}}
+<h2>{{if $f.CodeFlow}}Authorization Code + PKCE{{else}}Client Credentials{{end}} <small>— <a href="/clients/{{$f.ClientID}}"><code>{{$f.ClientID}}</code></a>（{{$f.Profile}}）{{$f.Created.Format "15:04:05"}} 開始</small></h2>
+
+{{if $f.CodeFlow}}
+<section class="step" id="step-0">
+  <header><h3>0. 認可要求</h3><small>RFC 6749 §4.1.1、RFC 7636 §4.3、OIDC Core §3.1.2.1</small></header>
+  <table>{{range $f.AuthParams}}<tr><th>{{.K}}</th><td><code>{{.V}}</code></td></tr>{{end}}</table>
+  {{if $f.Called}}<p class="muted">コールバックを受け取った。</p>
+  {{else}}<p><a class="button" href="{{$f.AuthURL}}">認可エンドポイントへ進む →</a></p>
+  <p class="muted">ログイン画面で承認すると、このコンソールの <code>/callback</code> に戻り、Code の交換と ID Token の検証まで進む。</p>{{end}}
+</section>
+{{end}}
+
+{{range $i, $s := $f.Steps}}
+<section class="step" id="step-{{inc $i}}">
+  <header><h3>{{inc $i}}. {{$s.Title}}</h3><small>{{$s.Ref}} · {{$s.At.Format "15:04:05"}}</small></header>
+  {{with $s.Params}}<table>{{range .}}<tr><th>{{.K}}</th><td><code>{{.V}}</code></td></tr>{{end}}</table>{{end}}
+  {{with $s.Checks}}<ul>{{range .}}<li>{{if .OK}}<span class="ok">✓</span>{{else}}<span class="ng">✗</span>{{end}} {{.Name}} <small>— {{.Detail}}</small></li>{{end}}</ul>{{end}}
+  {{with $s.Err}}<div class="error">{{.}}</div>{{end}}
+  {{with $s.Body}}<pre>{{.}}</pre>{{end}}
+  {{with $s.Extra}}<p><small>claims</small></p><pre>{{.}}</pre>{{end}}
+</section>
+{{end}}
+
+{{if $f.AccessToken}}
+<h2>トークン操作</h2>
+<div class="panel">
+  {{if $f.CodeFlow}}<form class="inline" method="post" action="/flows/{{$f.ID}}/userinfo"><button>UserInfo</button></form>
+  <form class="inline" method="post" action="/flows/{{$f.ID}}/refresh"><button {{if not $f.RefreshToken}}disabled{{end}}>Refresh</button></form>{{end}}
+  <form class="inline" method="post" action="/flows/{{$f.ID}}/introspect-access"><button class="secondary" {{if not $f.Confidential}}disabled title="public クライアントは呼べない"{{end}}>Introspect（access）</button></form>
+  {{if $f.RefreshToken}}<form class="inline" method="post" action="/flows/{{$f.ID}}/introspect-refresh"><button class="secondary" {{if not $f.Confidential}}disabled title="public クライアントは呼べない"{{end}}>Introspect（refresh）</button></form>{{end}}
+  <form class="inline" method="post" action="/flows/{{$f.ID}}/revoke-access"><button class="secondary">Revoke（access）</button></form>
+  {{if $f.RefreshToken}}<form class="inline" method="post" action="/flows/{{$f.ID}}/revoke-refresh"><button class="secondary">Revoke（refresh）</button></form>{{end}}
+  {{if not $f.Confidential}}<p class="muted">Introspection は confidential クライアントだけが呼べる（RFC 7662 §2.1）。</p>{{end}}
+  <p class="muted">Refresh は Rotation する。古い Refresh Token を再送すると再利用として検知され、Token Family ごと失効する。</p>
+</div>
+{{end}}
+{{template "foot"}}{{end}}
