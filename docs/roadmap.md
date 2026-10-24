@@ -163,6 +163,12 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - `Cache-Control` は `max-age`（`s-maxage` 優先）を [下限 1 分, 上限 24 時間] に収める。`no-store` / `no-cache` も下限でキャッシュする（取得ごとに文書サーバーへ問い合わせない判断。ADR-0008 §5 の「ヘッダーがなければ下限」と同じ扱い）。キャッシュ件数の上限（既定 1000。期限切れ → 期限の近いものの順に捨てる）を足した。未知の `client_id` を大量に送られてもメモリが際限なく増えないようにするため。
   - `Interaction API` の `GET /transactions/{id}` は `Store` ではなく `Engine.Clients` で Client を引く（CIMD Client は Store にない）。
   - `examples/standalone` と loginapp の対応（`-cimd-allow-loopback`、同意画面でのホスト名表示）はタスク 7。
+- **タスク 6（2026-10-25 完了）**: `resourceserver` パッケージ（`Protector`、`Config`、`Metadata`、`TokenVerifier` / `VerifierFunc`、`Principal` / `FromContext`、`IntrospectionVerifier`、`JWTVerifier`）。RFC 9728 のメタデータ（`MetadataHandler` を `MetadataPath()` に mount。path を持つ resource は `/.well-known/oauth-protected-resource/{path}`）、Bearer 検証（未提示は 401 + `resource_metadata` + `scope`、無効は 401 `invalid_token`、scope 不足は 403 `insufficient_scope`、検証方式の障害は 503）、`aud` の必須確認（正規形で比較、無効化する設定なし）。`keys.ImportJWKS`（公開 JWKS から検証専用の Set）を追加。計画との差分と補足:
+  - `IntrospectionVerifier` は応答の `token_type` が `Bearer` でない（省略を含む）トークンを拒否する。本エンジンの Introspection は Refresh Token に `token_type` を付けないので、Refresh Token を Bearer として持ち込まれても Resource Server で止まる。
+  - `JWTVerifier` は署名検証の前にヘッダの `alg` を許可リスト（既定 RS256 / ES256）で落とす。JWKS は `Cache-Control: max-age` を [1 分, 24 時間] で尊重し（既定 1 時間）、未知の `kid` では `MinRefresh`（既定 1 分）を過ぎていれば再取得する。再取得に失敗しても手元の JWKS があればそれで続ける。
+  - 認可サーバーメタデータ（RFC 8414）は `Issuer` から 1 回取得して `issuer` の一致を確認する（§3.3）。`Endpoint` / `JWKSURI` を直接与えればメタデータは取得しない。
+  - `scripts/check-core-deps.sh` に、`resourceserver` が認可サーバー側のパッケージ（ルート、`httpapi`、`authorization`、`token` 等）に依存しないことの検査を足した（ADR-0008 §7 の「同様の検査で守る」）。
+  - クエリやフォームの `access_token`（RFC 6750 §2.2、§2.3）は受け付けない（`bearer_methods_supported` は `header` のみ）。
 
 ### M3 で明示的に先送りするもの
 
