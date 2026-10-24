@@ -31,12 +31,14 @@ import (
 	"github.com/muno/auth-engine/client"
 	"github.com/muno/auth-engine/examples/standalone/loginapp"
 	"github.com/muno/auth-engine/httpapi"
+	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/storage"
 )
 
 func main() {
 	var (
 		dbPath          = flag.String("db", "auth.db", "SQLite database file")
+		keysPath        = flag.String("keys", "keys.json", "signing key set file (created on first run; keep it secret)")
 		issuer          = flag.String("issuer", "http://localhost:8080", "issuer URL (must match the public address)")
 		publicAddr      = flag.String("public-addr", ":8080", "listen address for /authorize and /token")
 		interactionAddr = flag.String("interaction-addr", "127.0.0.1:8081", "listen address for the Interaction API (keep private)")
@@ -48,7 +50,7 @@ func main() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(context.Background(), logger, options{
-		dbPath: *dbPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
+		dbPath: *dbPath, keysPath: *keysPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
 		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove,
 	}); err != nil {
 		logger.Error("server exited", "error", err)
@@ -57,8 +59,8 @@ func main() {
 }
 
 type options struct {
-	dbPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL string
-	autoApprove                                                      bool
+	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL string
+	autoApprove                                                                bool
 }
 
 func run(ctx context.Context, logger *slog.Logger, o options) error {
@@ -71,7 +73,11 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	}
 	defer store.Close()
 
-	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Logger: logger})
+	keySet, err := loadOrCreateKeys(o.keysPath, logger)
+	if err != nil {
+		return err
+	}
+	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Keys: keySet, Logger: logger})
 	if err != nil {
 		return err
 	}
@@ -160,6 +166,43 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 	}
 	logger.Info("registered demo client", "client_id", id, "profile", c.Profile)
 	return nil
+}
+
+// loadOrCreateKeys は鍵セットをファイルから読み、なければ RS256 と ES256 の鍵を生成して保存する。
+// 再起動後も同じ鍵で検証できるようにするため。ファイルは秘密鍵を含むので 0600 で書く。
+func loadOrCreateKeys(path string, logger *slog.Logger) (*keys.Set, error) {
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		set, err := keys.ImportPrivate(data)
+		if err != nil {
+			return nil, fmt.Errorf("load keys %s: %w", path, err)
+		}
+		logger.Info("loaded signing keys", "path", path, "algs", set.SigningAlgorithms())
+		return set, nil
+	case errors.Is(err, os.ErrNotExist):
+		set := keys.NewSet()
+		for _, alg := range []string{keys.AlgRS256, keys.AlgES256} {
+			k, err := keys.Generate(alg, time.Now())
+			if err != nil {
+				return nil, err
+			}
+			if err := set.AddSigning(k); err != nil {
+				return nil, err
+			}
+		}
+		data, err := set.ExportPrivate()
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return nil, fmt.Errorf("save keys %s: %w", path, err)
+		}
+		logger.Info("generated signing keys", "path", path, "algs", set.SigningAlgorithms())
+		return set, nil
+	default:
+		return nil, err
+	}
 }
 
 func randomToken() (string, error) {

@@ -14,7 +14,7 @@ go run ./cmd/server -db ./auth.db
 | Interaction API | `127.0.0.1:8081` | Interaction App 専用。外部に公開しない |
 | デモ Interaction App | `:8082` | `/login`。ユーザー名を入れて承認するだけの画面（パスワード検証なし） |
 
-初回起動時に Native クライアント `demo-cli`（redirect URI は `http://127.0.0.1/callback`、ポートは任意）を登録する。
+初回起動時に署名鍵セット（RS256 と ES256）を生成して `-keys`（既定 `keys.json`、0600）に保存し、Native クライアント `demo-cli`（redirect URI は `http://127.0.0.1/callback`、ポートは任意）を登録する。
 `-auto-approve` を付けると画面を出さず `demo-user` として全 scope を承認する（テスト・Conformance Suite 用）。
 
 ## クライアントでフローを実行

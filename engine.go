@@ -9,6 +9,8 @@ import (
 
 	"github.com/muno/auth-engine/authorization"
 	"github.com/muno/auth-engine/internal/clock"
+	"github.com/muno/auth-engine/keys"
+	"github.com/muno/auth-engine/oidc"
 	"github.com/muno/auth-engine/token"
 )
 
@@ -22,6 +24,10 @@ type Config struct {
 	// Store は永続化 Adapter。必須。
 	Store Store
 
+	// Keys は ID Token の署名鍵セット。必須。RS256 の署名鍵を含むこと
+	// （OIDC Core §15.1、Client の既定アルゴリズム）。
+	Keys *keys.Set
+
 	// Now は現在時刻の取得関数。nil なら time.Now。テストで固定時刻を注入する。
 	Now func() time.Time
 
@@ -32,17 +38,21 @@ type Config struct {
 	TransactionTTL time.Duration
 	// CodeTTL は Authorization Code の期限。0 なら 60 秒、上限 10 分（RFC 6749 §4.1.2）。
 	CodeTTL time.Duration
+	// IDTokenTTL は ID Token の有効期間。0 なら 1 時間、上限 24 時間。
+	IDTokenTTL time.Duration
 }
 
 // Engine は全 Service を配線した本体。HTTP 層（httpapi）はこれを受け取る。
 type Engine struct {
 	Issuer string
 	Store  Store
+	Keys   *keys.Set
 	Logger *slog.Logger
 	Clock  clock.Clock
 
 	Authorization *authorization.Service
 	Token         *token.Service
+	IDTokens      *oidc.IDTokenIssuer
 }
 
 // New は Config を検証して Engine を組み立てる。
@@ -59,6 +69,15 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.CodeTTL < 0 || cfg.CodeTTL > authorization.MaxCodeTTL {
 		return nil, fmt.Errorf("authengine: CodeTTL must be within (0, %s]", authorization.MaxCodeTTL)
 	}
+	if cfg.IDTokenTTL < 0 || cfg.IDTokenTTL > 24*time.Hour {
+		return nil, errors.New("authengine: IDTokenTTL must be within (0, 24h]")
+	}
+	if cfg.Keys == nil {
+		return nil, errors.New("authengine: Keys is required")
+	}
+	if _, err := cfg.Keys.SigningKey(keys.AlgRS256); err != nil {
+		return nil, errors.New("authengine: Keys must contain an RS256 signing key (OIDC Core §15.1)")
+	}
 
 	var clk clock.Clock = clock.Real{}
 	if cfg.Now != nil {
@@ -69,7 +88,8 @@ func New(cfg Config) (*Engine, error) {
 		logger = slog.Default()
 	}
 
-	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Logger: logger, Clock: clk}
+	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk}
+	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
 	e.Authorization = &authorization.Service{
 		Clients:        cfg.Store,
 		Store:          cfg.Store,
@@ -80,10 +100,11 @@ func New(cfg Config) (*Engine, error) {
 		CodeTTL:        cfg.CodeTTL,
 	}
 	e.Token = &token.Service{
-		Clients: cfg.Store,
-		Store:   cfg.Store,
-		Clock:   clk,
-		Logger:  logger,
+		Clients:  cfg.Store,
+		Store:    cfg.Store,
+		Clock:    clk,
+		Logger:   logger,
+		IDTokens: e.IDTokens,
 	}
 	return e, nil
 }

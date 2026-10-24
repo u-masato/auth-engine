@@ -22,6 +22,7 @@ import (
 	"github.com/muno/auth-engine/examples/standalone/oauthclient"
 	"github.com/muno/auth-engine/httpapi"
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/token"
 )
 
@@ -34,6 +35,7 @@ type system struct {
 	public    *httptest.Server
 	internal  *httptest.Server
 	login     *httptest.Server
+	keys      *keys.Set
 	webSecret string
 
 	mu  sync.Mutex
@@ -80,8 +82,16 @@ func newSystem(t *testing.T, autoApprove bool) *system {
 	s.login = httptest.NewServer(login.Handler())
 	t.Cleanup(s.login.Close)
 
+	signing, err := keys.Generate(keys.AlgRS256, s.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.keys = keys.NewSet()
+	if err := s.keys.AddSigning(signing); err != nil {
+		t.Fatal(err)
+	}
 	engine, err := authengine.New(authengine.Config{
-		Issuer: s.public.URL, Store: store, Now: s.clock,
+		Issuer: s.public.URL, Store: store, Keys: s.keys, Now: s.clock,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

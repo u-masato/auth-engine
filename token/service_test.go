@@ -334,4 +334,55 @@ func TestConcurrentExchange(t *testing.T) {
 	}
 }
 
+// fakeIDTokens は発行要求を記録する IDTokenIssuer。
+type fakeIDTokens struct {
+	calls []token.IDTokenInput
+}
+
+func (f *fakeIDTokens) IssueIDToken(_ context.Context, c *client.Client, in token.IDTokenInput) (string, error) {
+	f.calls = append(f.calls, in)
+	return "idtoken-for-" + c.ID, nil
+}
+
+func TestIDTokenIssuedForOpenID(t *testing.T) {
+	f := newFixture(t)
+	fake := &fakeIDTokens{}
+	f.svc.IDTokens = fake
+	code := f.issueCode(t, "web", true) // scopes: openid profile
+	res, err := f.svc.Exchange(f.ctx, f.codeRequest(code))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IDToken != "idtoken-for-web" || len(fake.calls) != 1 {
+		t.Fatalf("id token not issued: %+v", res)
+	}
+	in := fake.calls[0]
+	if in.Subject != "alice" || in.Nonce != "n" || in.AccessToken != res.AccessToken || !in.AuthenticatedAt.Equal(now) {
+		t.Fatalf("id token input: %+v", in)
+	}
+
+	// openid がない Code では発行しない
+	plain, _ := rand.Token("")
+	fam, _ := rand.Token("")
+	_ = f.store.CreateAuthorizationCode(f.ctx, &authorization.AuthorizationCode{
+		Hash: rand.Hash(plain), TxnID: "t", ClientID: "web", GrantID: f.grantID, FamilyID: fam, Subject: "alice",
+		RedirectURI: redirect, RedirectURIExplicit: true, Scopes: []string{"profile"},
+		CodeChallenge: rfcChallenge, CodeChallengeMethod: "S256", AuthenticatedAt: now, CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+	})
+	res, err = f.svc.Exchange(f.ctx, f.codeRequest(plain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IDToken != "" || len(fake.calls) != 1 {
+		t.Fatalf("id token must not be issued without openid: %+v", res)
+	}
+
+	// IDTokens が nil なら openid でも発行しない（OAuth 2.0 のみの構成）
+	f.svc.IDTokens = nil
+	res, err = f.svc.Exchange(f.ctx, f.codeRequest(f.issueCode(t, "web", true)))
+	if err != nil || res.IDToken != "" {
+		t.Fatalf("nil issuer: %+v %v", res, err)
+	}
+}
+
 func mustErr(_ *token.Response, err error) error { return err }

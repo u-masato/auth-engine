@@ -14,7 +14,10 @@ const (
 	PathAuthorize = "/authorize"
 	PathResume    = "/authorize/resume"
 	PathToken     = "/token"
+	PathJWKS      = "/jwks"
+	PathUserInfo  = "/userinfo"
 	PathMetadata  = "/.well-known/oauth-authorization-server"
+	PathOpenID    = "/.well-known/openid-configuration"
 )
 
 // Config は HTTP 層の設定。
@@ -82,7 +85,9 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.HandleFunc("POST "+PathAuthorize, s.handleAuthorize)
 	mux.HandleFunc("GET "+PathResume, s.handleResume)
 	mux.HandleFunc("POST "+PathToken, s.handleToken)
+	mux.HandleFunc("GET "+PathJWKS, s.handleJWKS)
 	mux.HandleFunc("GET "+PathMetadata, s.handleMetadata)
+	mux.HandleFunc("GET "+PathOpenID, s.handleOpenIDConfiguration)
 	return mux
 }
 

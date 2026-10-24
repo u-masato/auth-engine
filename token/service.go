@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ type Service struct {
 	Clock   clock.Clock
 	// Logger は監査イベント（発行、再利用検知）の出力先。nil なら slog.Default()。
 	Logger *slog.Logger
+	// IDTokens は openid scope が付与されたときに ID Token を発行する。nil なら発行しない。
+	IDTokens IDTokenIssuer
 }
 
 // Request はトークン要求（RFC 6749 §4.1.3）。HTTP 層がフォームから組み立てる。
@@ -125,12 +128,24 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 	s.logger().InfoContext(ctx, "token issued",
 		"event", "token.issued", "client_id", c.ID, "grant_id", code.GrantID, "family_id", family.ID, "grant_type", req.GrantType)
 
-	return &Response{
+	res := &Response{
 		AccessToken: plaintext,
 		TokenType:   "Bearer",
 		ExpiresIn:   int64(access.ExpiresAt.Sub(now) / time.Second),
 		Scope:       strings.Join(code.Scopes, " "),
-	}, nil
+	}
+	// OIDC Core §3.1.3.3: openid が付与されていれば ID Token を返す。
+	if s.IDTokens != nil && c.IssuesIDToken() && slices.Contains(code.Scopes, "openid") {
+		idToken, err := s.IDTokens.IssueIDToken(ctx, c, IDTokenInput{
+			Subject: code.Subject, AuthenticatedAt: code.AuthenticatedAt, Nonce: code.Nonce,
+			AMR: code.AMR, ACR: code.ACR, AccessToken: plaintext, Scopes: code.Scopes,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("token: issue id token: %w", err)
+		}
+		res.IDToken = idToken
+	}
+	return res, nil
 }
 
 // revokeFamilyOnReuse は再利用された Code の Family を失効させる。

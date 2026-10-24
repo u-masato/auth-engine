@@ -17,6 +17,8 @@ import (
 	"github.com/muno/auth-engine/client"
 	"github.com/muno/auth-engine/httpapi"
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/keys"
+	"github.com/muno/auth-engine/oidc"
 	"github.com/muno/auth-engine/storage/memory"
 	"github.com/muno/auth-engine/token"
 )
@@ -35,6 +37,7 @@ var now = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 type env struct {
 	t         *testing.T
 	store     *memory.Store
+	keys      *keys.Set
 	public    http.Handler
 	internal  http.Handler
 	webSecret string
@@ -59,8 +62,18 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	e.webSecret = string(secret)
+	e.keys = keys.NewSet()
+	for _, alg := range []string{keys.AlgRS256, keys.AlgES256} {
+		k, err := keys.Generate(alg, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.keys.AddSigning(k); err != nil {
+			t.Fatal(err)
+		}
+	}
 	engine, err := authengine.New(authengine.Config{
-		Issuer: issuer, Store: e.store, Now: func() time.Time { return e.now },
+		Issuer: issuer, Store: e.store, Keys: e.keys, Now: func() time.Time { return e.now },
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -219,6 +232,29 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if !strings.HasPrefix(res.AccessToken, "at_") || res.TokenType != "Bearer" || res.ExpiresIn != 3600 || res.Scope != "openid profile" {
 		t.Fatalf("token response: %s", rec.Body)
+	}
+	// openid が付与されたので ID Token が付き、/jwks の鍵で検証できる（OIDC Core §3.1.3.3, §3.1.3.7）
+	if res.IDToken == "" {
+		t.Fatal("id_token must be issued for openid scope")
+	}
+	var idc struct {
+		Iss      string   `json:"iss"`
+		Sub      string   `json:"sub"`
+		Aud      []string `json:"aud"`
+		Nonce    string   `json:"nonce"`
+		ATHash   string   `json:"at_hash"`
+		AuthTime int64    `json:"auth_time"`
+		Exp      int64    `json:"exp"`
+		AMR      []string `json:"amr"`
+	}
+	h, err := e.keys.Verify(res.IDToken, &idc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash, _ := oidc.AccessTokenHash(h.Alg, res.AccessToken)
+	if h.Alg != "RS256" || idc.Iss != issuer || idc.Sub != "alice" || len(idc.Aud) != 1 || idc.Aud[0] != "web" || idc.Nonce != "n1" ||
+		idc.ATHash != wantHash || idc.AuthTime != now.Add(-time.Minute).Unix() || idc.Exp != now.Add(time.Hour).Unix() || len(idc.AMR) != 1 {
+		t.Fatalf("id token claims: %+v", idc)
 	}
 	at, g, err := e.store.LookupAccessToken(context.Background(), rand.Hash(res.AccessToken))
 	if err != nil || at.Subject != "alice" || !g.Active() {
@@ -481,6 +517,43 @@ func TestBasicCredentialsAreFormDecoded(t *testing.T) {
 	}
 }
 
+func TestJWKSAndOpenIDConfiguration(t *testing.T) {
+	e := newEnv(t)
+	rec := e.do(e.public, httptest.NewRequest(http.MethodGet, "/jwks", nil))
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("jwks: %d %v", rec.Code, rec.Header())
+	}
+	var jwks struct {
+		Keys []map[string]any `json:"keys"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &jwks); err != nil || len(jwks.Keys) != 2 {
+		t.Fatalf("jwks body: %s %v", rec.Body, err)
+	}
+	if strings.Contains(rec.Body.String(), `"d":`) {
+		t.Fatal("jwks must not contain private keys")
+	}
+
+	rec = e.do(e.public, httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("openid-configuration: %d", rec.Code)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["issuer"] != issuer || m["jwks_uri"] != issuer+"/jwks" || m["userinfo_endpoint"] != issuer+"/userinfo" ||
+		m["claims_parameter_supported"] != false || m["request_parameter_supported"] != false {
+		t.Fatalf("openid-configuration body: %s", rec.Body)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"subject_types_supported":["public"]`, `"id_token_signing_alg_values_supported":["RS256","ES256"]`,
+		`"scopes_supported":["openid","profile","email","address","phone"]`, `"email_verified"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
+	}
+}
+
 func TestMetadata(t *testing.T) {
 	e := newEnv(t)
 	rec := e.do(e.public, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
@@ -492,8 +565,11 @@ func TestMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m["issuer"] != issuer || m["authorization_endpoint"] != issuer+"/authorize" || m["token_endpoint"] != issuer+"/token" ||
-		m["authorization_response_iss_parameter_supported"] != true {
+		m["jwks_uri"] != issuer+"/jwks" || m["authorization_response_iss_parameter_supported"] != true {
 		t.Fatalf("metadata body: %s", rec.Body)
+	}
+	if _, oidcOnly := m["subject_types_supported"]; oidcOnly {
+		t.Fatal("oauth-authorization-server must not carry OIDC-only fields")
 	}
 	if !strings.Contains(rec.Body.String(), `"code_challenge_methods_supported":["S256"]`) {
 		t.Fatalf("pkce methods: %s", rec.Body)
@@ -501,7 +577,10 @@ func TestMetadata(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
-	engine, _ := authengine.New(authengine.Config{Issuer: issuer, Store: memory.New()})
+	ks := keys.NewSet()
+	k, _ := keys.Generate(keys.AlgRS256, now)
+	_ = ks.AddSigning(k)
+	engine, _ := authengine.New(authengine.Config{Issuer: issuer, Store: memory.New(), Keys: ks})
 	bad := []httpapi.Config{
 		{InteractionURL: interaction, InteractionAuth: httpapi.BearerAuthenticator{Token: "x"}},
 		{Engine: engine, InteractionURL: "/relative", InteractionAuth: httpapi.BearerAuthenticator{Token: "x"}},
