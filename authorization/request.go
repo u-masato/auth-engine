@@ -47,6 +47,12 @@ func parseRequest(ctx context.Context, clients client.Resolver, values url.Value
 	if err != nil {
 		return nil, nil, &Error{Code: CodeInvalidRequest, Description: err.Error()}
 	}
+	// OIDC Core §3.1.2.1: OpenID Connect の認可要求では redirect_uri は必須。RFC 6749 だけの要求
+	// （openid なし）では登録 URI が 1 つなら省略できる（§3.1.2.3）。要求元が確定できないので
+	// リダイレクトせずエラーページにする。
+	if values.Get("redirect_uri") == "" && slices.Contains(strings.Fields(values.Get("scope")), "openid") {
+		return nil, nil, &Error{Code: CodeInvalidRequest, Description: "redirect_uri is required for OpenID Connect requests"}
+	}
 
 	// --- 3. ここからは Client へリダイレクトして返せる ---
 	state := values.Get("state")

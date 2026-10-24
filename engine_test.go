@@ -64,4 +64,11 @@ func TestNew(t *testing.T) {
 			t.Errorf("%s must be accepted: %v", iss, err)
 		}
 	}
+	// AllowInsecureIssuer は localhost 以外の http を許す（警告付き）。https 以外のスキームは依然拒否
+	if _, err := authengine.New(authengine.Config{Issuer: "http://host.docker.internal:8080", Store: memory.New(), Keys: ks, AllowInsecureIssuer: true}); err != nil {
+		t.Errorf("insecure issuer must be accepted when allowed: %v", err)
+	}
+	if _, err := authengine.New(authengine.Config{Issuer: "ftp://as.example.com", Store: memory.New(), Keys: ks, AllowInsecureIssuer: true}); err == nil {
+		t.Error("non-http scheme must be rejected even when insecure issuer is allowed")
+	}
 }

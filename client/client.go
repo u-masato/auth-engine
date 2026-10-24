@@ -67,8 +67,11 @@ type Client struct {
 
 // WebParams は NewWeb の入力。
 type WebParams struct {
-	ID                     string // 空なら生成
-	Name                   string
+	ID   string // 空なら生成
+	Name string
+	// Secret は空なら生成する。既存システムからの移行や Conformance Suite のように
+	// 事前に決まったシークレットが必要なときだけ指定する。32 バイト以上であること。
+	Secret                 string
 	RedirectURIs           []string
 	Scopes                 []string
 	LogoURI                string
@@ -95,6 +98,7 @@ type NativeParams struct {
 type MachineParams struct {
 	ID             string
 	Name           string
+	Secret         string // 空なら生成（WebParams.Secret と同じ）
 	Scopes         []string
 	AccessTokenTTL time.Duration
 }
@@ -115,7 +119,7 @@ func NewWeb(p WebParams, now time.Time) (*Client, Secret, error) {
 		AllowInsecureLocalhost: p.AllowInsecureLocalhost,
 		CreatedAt:              now,
 	}
-	secret, err := c.finish()
+	secret, err := c.finish(p.Secret)
 	if err != nil {
 		return nil, "", err
 	}
@@ -137,7 +141,7 @@ func NewNative(p NativeParams, now time.Time) (*Client, error) {
 		AllowInsecureLocalhost: p.AllowInsecureLocalhost,
 		CreatedAt:              now,
 	}
-	if _, err := c.finish(); err != nil {
+	if _, err := c.finish(""); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -153,15 +157,19 @@ func NewMachine(p MachineParams, now time.Time) (*Client, Secret, error) {
 		AccessTokenTTL: p.AccessTokenTTL,
 		CreatedAt:      now,
 	}
-	secret, err := c.finish()
+	secret, err := c.finish(p.Secret)
 	if err != nil {
 		return nil, "", err
 	}
 	return c, secret, nil
 }
 
-// finish は既定値の補完、ID・シークレットの生成、検証を行う。
-func (c *Client) finish() (Secret, error) {
+// MinSecretLength は利用者が指定するシークレットの最小長（バイト）。生成するシークレットは
+// 256 bit 乱数の base64url（43 文字）なので、それに見合う長さを求める。
+const MinSecretLength = 32
+
+// finish は既定値の補完、ID・シークレットの生成（presented が空のとき）、検証を行う。
+func (c *Client) finish(presented string) (Secret, error) {
 	r := c.Profile.rules()
 
 	if c.ID == "" {
@@ -176,13 +184,22 @@ func (c *Client) finish() (Secret, error) {
 	}
 
 	var secret Secret
-	if r.confidential {
+	switch {
+	case r.confidential && presented != "":
+		if len(presented) < MinSecretLength {
+			return "", fmt.Errorf("%w: secret must be at least %d bytes", ErrInvalid, MinSecretLength)
+		}
+		secret = Secret(presented)
+		c.SecretHash = rand.Hash(presented)
+	case r.confidential:
 		s, err := rand.Token("")
 		if err != nil {
 			return "", err
 		}
 		secret = Secret(s)
 		c.SecretHash = rand.Hash(s)
+	case presented != "":
+		return "", fmt.Errorf("%w: public client must not have a secret", ErrInvalid)
 	}
 
 	if err := c.Validate(); err != nil {

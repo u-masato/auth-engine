@@ -1,0 +1,23 @@
+[
+  {
+    "client_id": "conformance-web",
+    "profile": "web",
+    "name": "Conformance Suite (client_secret_basic)",
+    "secret": "conformance-web-secret-0123456789abcdef0123456789",
+    "redirect_uris": [
+      "https://localhost.emobix.co.uk:8443/test/a/auth-engine/callback",
+      "https://localhost.emobix.co.uk:8443/test/a/auth-engine/callback?dummy1=lorem&dummy2=ipsum"
+    ],
+    "scopes": ["openid", "profile", "email", "address", "phone", "offline_access"]
+  },
+  {
+    "client_id": "conformance-web-2",
+    "profile": "web",
+    "name": "Conformance Suite (second client)",
+    "secret": "conformance-web-2-secret-0123456789abcdef0123456789",
+    "redirect_uris": [
+      "https://localhost.emobix.co.uk:8443/test/a/auth-engine/callback"
+    ],
+    "scopes": ["openid", "profile", "email", "address", "phone", "offline_access"]
+  }
+]

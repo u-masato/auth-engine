@@ -2,11 +2,14 @@
 // 最小実装である。エンジンの外側で動く別アプリケーションの例として、またテストの
 // 自動承認用（AutoApprove）として使う。
 //
+// ログイン状態は署名なしの Cookie セッション（session.go）で持ち、prompt=none / prompt=login /
+// max_age の解釈（OIDC Core §3.1.2.1）はこのセッションに基づいて行う。Conformance Suite の
+// Basic OP プロファイルが要求する範囲を満たすための最小実装である。
+//
 // 本番の Interaction App に必要だがここで省いているもの:
 //   - 実際の認証（パスワード、パスキー、MFA）。ここではユーザー名を入力するだけで認証済みとみなす。
-//   - ログインフォームの CSRF 対策と、自アプリのセッションへの Txn ID の紐づけ
+//   - 署名付きセッション、ログインフォームの CSRF 対策、自アプリのセッションへの Txn ID の紐づけ
 //     （docs/adr/0003-interaction-contract.md §6 の推奨事項）。
-//   - prompt=none / login_hint / max_age の解釈。
 package loginapp
 
 import (
@@ -19,6 +22,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -86,6 +90,7 @@ type Transaction struct {
 		Scopes    []string `json:"scopes"`
 		LoginHint string   `json:"login_hint"`
 		Prompt    []string `json:"prompt"`
+		MaxAge    *int64   `json:"max_age"`
 	} `json:"request"`
 }
 
@@ -211,8 +216,19 @@ func (a *App) handleGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this authorization request has already been handled; start again from the application", http.StatusConflict)
 		return
 	}
+	d := decide(r, txn, time.Now())
+	if d.Reject != "" {
+		// prompt=none でログインが必要: UI を出さずに Reject する
+		a.reject(w, r, txn.ID, d.Reject, "authentication is required but prompt=none was requested")
+		return
+	}
 	if a.cfg.AutoApprove {
-		a.approve(w, r, txn, a.cfg.AutoSubject, txn.Request.Scopes)
+		a.approve(w, r, txn, a.cfg.AutoSubject, txn.Request.Scopes, d)
+		return
+	}
+	if d.Session != nil && !slices.Contains(txn.Request.Prompt, "consent") {
+		// ログイン済みで再認証も同意の再表示も求められていなければ、そのまま承認する
+		a.approve(w, r, txn, d.Session.Subject, txn.Request.Scopes, d)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -238,44 +254,65 @@ func (a *App) handlePost(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "username is required", http.StatusBadRequest)
 			return
 		}
-		a.approve(w, r, txn, username, r.PostForm["scope"])
-	default:
-		resume, err := a.Reject(r.Context(), txn.ID, "access_denied", "the user denied the request")
-		if err != nil {
-			a.apiFailure(w, err)
-			return
+		d := decide(r, txn, time.Now())
+		if d.Session != nil && d.Session.Subject != username {
+			d = decision{Fresh: true} // 別のユーザーとしてログインし直した
 		}
-		http.Redirect(w, r, resume, http.StatusFound)
+		a.approve(w, r, txn, username, r.PostForm["scope"], d)
+	default:
+		a.reject(w, r, txn.ID, "access_denied", "the user denied the request")
 	}
 }
 
 // approve は subject として認証済みとみなし、granted を承認して Resume URL へ戻す。
-func (a *App) approve(w http.ResponseWriter, r *http.Request, txn *Transaction, subject string, granted []string) {
+// d.Session があれば認証時刻はセッションのもの（既存ログインの再利用）、なければ今。
+func (a *App) approve(w http.ResponseWriter, r *http.Request, txn *Transaction, subject string, granted []string, d decision) {
 	if len(granted) == 0 {
 		// scope をすべて外した承認は拒否として扱う（エンジンは空の granted_scopes を受け付けない）。
-		resume, err := a.Reject(r.Context(), txn.ID, "access_denied", "no scope was granted")
-		if err != nil {
-			a.apiFailure(w, err)
-			return
-		}
-		http.Redirect(w, r, resume, http.StatusFound)
+		a.reject(w, r, txn.ID, "access_denied", "no scope was granted")
 		return
+	}
+	authenticatedAt := time.Now()
+	if d.Session != nil {
+		authenticatedAt = d.Session.AuthenticatedAt
 	}
 	resume, err := a.Complete(r.Context(), txn.ID, Outcome{
 		Subject:         subject,
-		AuthenticatedAt: time.Now(),
+		AuthenticatedAt: authenticatedAt,
 		GrantedScopes:   granted,
 		AMR:             []string{"demo"},
-		Claims: map[string]any{
-			"name":  subject,
-			"email": subject + "@example.com",
-		},
+		Claims:          demoClaims(subject, authenticatedAt),
 	})
 	if err != nil {
 		a.apiFailure(w, err)
 		return
 	}
+	writeSession(w, session{Subject: subject, AuthenticatedAt: authenticatedAt})
 	http.Redirect(w, r, resume, http.StatusFound)
+}
+
+func (a *App) reject(w http.ResponseWriter, r *http.Request, txnID, code, description string) {
+	resume, err := a.Reject(r.Context(), txnID, code, description)
+	if err != nil {
+		a.apiFailure(w, err)
+		return
+	}
+	http.Redirect(w, r, resume, http.StatusFound)
+}
+
+// demoClaims は OIDC Core §5.1 の標準 Claims をひととおり埋めたデモ用の値。
+// エンジンは付与された scope で絞って UserInfo から返す（docs/adr/0006 §3）。
+func demoClaims(subject string, authenticatedAt time.Time) map[string]any {
+	return map[string]any{
+		"name": subject + " Example", "given_name": subject, "family_name": "Example", "middle_name": "Demo",
+		"nickname": subject, "preferred_username": subject, "profile": "https://example.com/" + subject,
+		"picture": "https://example.com/" + subject + ".png", "website": "https://example.com", "gender": "unspecified",
+		"birthdate": "1990-01-01", "zoneinfo": "Asia/Tokyo", "locale": "ja-JP", "updated_at": authenticatedAt.Unix(),
+		"email": subject + "@example.com", "email_verified": true,
+		"address": map[string]any{"formatted": "1-1 Example-cho, Chiyoda-ku, Tokyo 100-0001, JP", "street_address": "1-1 Example-cho",
+			"locality": "Chiyoda-ku", "region": "Tokyo", "postal_code": "100-0001", "country": "JP"},
+		"phone_number": "+81 3-0000-0000", "phone_number_verified": false,
+	}
 }
 
 func (a *App) apiFailure(w http.ResponseWriter, err error) {

@@ -19,8 +19,13 @@ import (
 type Config struct {
 	// Issuer は認可サーバーの識別子（RFC 8414 の issuer）。https の絶対 URL で、
 	// クエリとフラグメントを含まない。開発用に http://localhost / loopback も許す。
-	// M1 ではパスを含まないこと（エンドポイントは Issuer 直下に配置する）。
+	// パスを含まないこと（エンドポイントは Issuer 直下に配置する）。
 	Issuer string
+
+	// AllowInsecureIssuer は localhost 以外の http Issuer を許す開発用の緩和
+	// （例: Docker 内の Conformance Suite から http://host.docker.internal:8080 で到達させる）。
+	// 既定 false。true のとき起動時に警告ログを出す。本番では使わない。
+	AllowInsecureIssuer bool
 
 	// Store は永続化 Adapter。必須。
 	Store Store
@@ -65,7 +70,7 @@ type Engine struct {
 
 // New は Config を検証して Engine を組み立てる。
 func New(cfg Config) (*Engine, error) {
-	if err := ValidateIssuer(cfg.Issuer); err != nil {
+	if err := validateIssuer(cfg.Issuer, cfg.AllowInsecureIssuer); err != nil {
 		return nil, err
 	}
 	if cfg.Store == nil {
@@ -108,6 +113,10 @@ func New(cfg Config) (*Engine, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if cfg.AllowInsecureIssuer {
+		logger.Warn("insecure issuer allowed: http issuer accepted for non-localhost hosts; use only for local development",
+			"event", "config.insecure_issuer", "issuer", cfg.Issuer)
+	}
 
 	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk}
 	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
@@ -135,8 +144,10 @@ func New(cfg Config) (*Engine, error) {
 	return e, nil
 }
 
-// ValidateIssuer は Issuer の形式を検証する。
-func ValidateIssuer(issuer string) error {
+// ValidateIssuer は Issuer の形式を検証する。http は localhost / loopback に限る。
+func ValidateIssuer(issuer string) error { return validateIssuer(issuer, false) }
+
+func validateIssuer(issuer string, allowInsecure bool) error {
 	u, err := url.Parse(issuer)
 	if err != nil || u.Host == "" {
 		return errors.New("authengine: Issuer must be an absolute URL")
@@ -150,8 +161,8 @@ func ValidateIssuer(issuer string) error {
 	switch u.Scheme {
 	case "https":
 	case "http":
-		if !isLocalHost(u.Hostname()) {
-			return errors.New("authengine: Issuer must use https (http is allowed only for localhost)")
+		if !allowInsecure && !isLocalHost(u.Hostname()) {
+			return errors.New("authengine: Issuer must use https (http is allowed only for localhost unless AllowInsecureIssuer is set)")
 		}
 	default:
 		return errors.New("authengine: Issuer scheme must be https")

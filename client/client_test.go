@@ -150,3 +150,21 @@ func TestValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPresentedSecret(t *testing.T) {
+	const presented = "conformance-client-secret-0123456789abcdef"
+	c, secret, err := NewWeb(WebParams{Name: "web", Secret: presented, RedirectURIs: []string{"https://app.example.com/cb"}, Scopes: []string{"openid"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(secret) != presented || !c.VerifySecret(presented) {
+		t.Fatal("presented secret must be used as is")
+	}
+	// 短すぎるシークレットは拒否
+	if _, _, err := NewWeb(WebParams{Name: "web", Secret: "short", RedirectURIs: []string{"https://app.example.com/cb"}, Scopes: []string{"openid"}}, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("short secret: %v", err)
+	}
+	if _, _, err := NewMachine(MachineParams{Name: "svc", Secret: presented, Scopes: []string{"api"}}, now); err != nil {
+		t.Fatalf("machine with presented secret: %v", err)
+	}
+}

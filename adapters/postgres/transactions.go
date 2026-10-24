@@ -127,8 +127,8 @@ func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization
 
 func scanCode(row rowScanner) (*authorization.AuthorizationCode, error) {
 	var (
-		c                                        authorization.AuthorizationCode
-		scopes, amr, claims                      sql.NullString
+		c                                         authorization.AuthorizationCode
+		scopes, amr, claims                       sql.NullString
 		authenticated, created, expires, consumed sql.NullInt64
 	)
 	err := row.Scan(&c.Hash, &c.TxnID, &c.ClientID, &c.GrantID, &c.FamilyID, &c.Subject, &c.RedirectURI, &c.RedirectURIExplicit,

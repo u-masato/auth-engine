@@ -1,0 +1,21 @@
+{
+  "alias": "auth-engine",
+  "description": "auth-engine (local, http issuer via host.docker.internal)",
+  "server": {
+    "discoveryUrl": "http://host.docker.internal:8080/.well-known/openid-configuration",
+    "login_hint": "demo-user"
+  },
+  "client": {
+    "client_id": "conformance-web",
+    "client_secret": "conformance-web-secret-0123456789abcdef0123456789"
+  },
+  "client2": {
+    "client_id": "conformance-web-2",
+    "client_secret": "conformance-web-2-secret-0123456789abcdef0123456789"
+  },
+  "client_secret_post": {
+    "client_id": "conformance-web",
+    "client_secret": "conformance-web-secret-0123456789abcdef0123456789"
+  },
+  "consent": {}
+}

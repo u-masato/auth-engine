@@ -52,7 +52,7 @@ func newFixture(t *testing.T) *fixture {
 
 func params() url.Values {
 	return url.Values{
-		"response_type": {"code"}, "client_id": {"web"}, "scope": {"openid profile"}, "state": {"xyz"},
+		"response_type": {"code"}, "client_id": {"web"}, "redirect_uri": {"https://app.example.com/cb?env=prod"}, "scope": {"openid profile"}, "state": {"xyz"},
 		"code_challenge": {rfcChallenge}, "code_challenge_method": {"S256"}, "nonce": {"n1"}, "max_age": {"600"},
 	}
 }
@@ -160,7 +160,7 @@ func TestCompleteThenResume(t *testing.T) {
 	}
 	if ac.TxnID != txn.ID || ac.ClientID != "web" || ac.Subject != "alice" || ac.GrantID == "" || ac.FamilyID == "" ||
 		ac.CodeChallenge != rfcChallenge || ac.Nonce != "n1" || !slices.Equal(ac.Scopes, []string{"openid", "profile"}) ||
-		ac.RedirectURI != "https://app.example.com/cb?env=prod" || ac.RedirectURIExplicit || ac.Claims["name"] != "Alice" ||
+		ac.RedirectURI != "https://app.example.com/cb?env=prod" || !ac.RedirectURIExplicit || ac.Claims["name"] != "Alice" ||
 		!slices.Equal(ac.AMR, []string{"pwd"}) || !ac.ExpiresAt.Equal(f.clock.Now().Add(authorization.DefaultCodeTTL)) {
 		t.Fatalf("code: %+v", ac)
 	}

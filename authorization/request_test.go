@@ -88,14 +88,28 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	p.Set("client_id", "cli")
 	p.Del("redirect_uri")
 	p.Set("scope", "openid  openid")
-	req, _, perr := parseRequest(context.Background(), testClients(t), p)
+	// OIDC（openid あり）では redirect_uri を省略できない。リダイレクト先が確定しないのでエラーページ
+	_, _, perr := parseRequest(context.Background(), testClients(t), p)
+	if perr == nil || perr.Code != CodeInvalidRequest || perr.Redirectable() {
+		t.Fatalf("openid without redirect_uri must be a non-redirectable invalid_request: %v", perr)
+	}
+	// OAuth 2.0 だけの要求なら、登録 URI が 1 つの public クライアントは省略できる（RFC 6749 §3.1.2.3）
+	plain, err := client.NewNative(client.NativeParams{ID: "plain", Name: "Plain", RedirectURIs: []string{"http://127.0.0.1/cb"}, Scopes: []string{"read", "openid"}}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients := testClients(t)
+	clients["plain"] = plain
+	p.Set("client_id", "plain")
+	p.Set("scope", "read  read")
+	req, _, perr := parseRequest(context.Background(), clients, p)
 	if perr != nil {
 		t.Fatal(perr)
 	}
 	if req.RedirectURI != "http://127.0.0.1/cb" || req.RedirectURIExplicit {
 		t.Fatalf("default redirect: %+v", req)
 	}
-	if !slices.Equal(req.Scopes, []string{"openid"}) {
+	if !slices.Equal(req.Scopes, []string{"read"}) {
 		t.Fatalf("scopes must be deduplicated: %v", req.Scopes)
 	}
 }

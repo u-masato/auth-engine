@@ -1,0 +1,9 @@
+[
+  {
+    "test-name": "oidcc-server-rotate-keys",
+    "variant": {},
+    "condition": "CheckIfTokenEndpointRotatedKeys",
+    "expected-result": "FAILURE",
+    "comment": "鍵のローテーションはテスト中に手動で行う必要がある。examples/standalone には鍵を差し替える操作がない"
+  }
+]

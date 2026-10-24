@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -45,13 +46,15 @@ func main() {
 		loginAddr       = flag.String("login-addr", ":8082", "listen address for the demo login app")
 		loginURL        = flag.String("login-url", "http://localhost:8082/login", "public URL of the demo login app")
 		autoApprove     = flag.Bool("auto-approve", false, "approve every request as demo-user without showing a form (tests only)")
+		clientsPath     = flag.String("clients", "", "JSON file of clients to register on startup (see conformance/clients.json)")
+		insecureIssuer  = flag.Bool("allow-insecure-issuer", false, "allow an http issuer other than localhost (e.g. http://host.docker.internal:8080; local development only)")
 	)
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(context.Background(), logger, options{
 		dbPath: *dbPath, keysPath: *keysPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
-		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove,
+		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove, clientsPath: *clientsPath, insecureIssuer: *insecureIssuer,
 	}); err != nil {
 		logger.Error("server exited", "error", err)
 		os.Exit(1)
@@ -59,8 +62,8 @@ func main() {
 }
 
 type options struct {
-	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL string
-	autoApprove                                                                bool
+	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL, clientsPath string
+	autoApprove, insecureIssuer                                                             bool
 }
 
 func run(ctx context.Context, logger *slog.Logger, o options) error {
@@ -77,12 +80,17 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	if err != nil {
 		return err
 	}
-	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Keys: keySet, Logger: logger})
+	engine, err := authengine.New(authengine.Config{Issuer: o.issuer, Store: store, Keys: keySet, Logger: logger, AllowInsecureIssuer: o.insecureIssuer})
 	if err != nil {
 		return err
 	}
 	if err := registerDemoClients(ctx, store, logger); err != nil {
 		return err
+	}
+	if o.clientsPath != "" {
+		if err := registerClientsFromFile(ctx, store, logger, o.clientsPath); err != nil {
+			return err
+		}
 	}
 
 	// Interaction API のトークンはプロセス内で生成し、同梱の loginapp にだけ渡す。
@@ -165,6 +173,68 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 		return err
 	}
 	logger.Info("registered demo client", "client_id", id, "profile", c.Profile)
+	return nil
+}
+
+// clientSpec は -clients で読むクライアント定義。
+type clientSpec struct {
+	ClientID               string   `json:"client_id"`
+	Profile                string   `json:"profile"` // web | native | machine
+	Name                   string   `json:"name"`
+	RedirectURIs           []string `json:"redirect_uris"`
+	Scopes                 []string `json:"scopes"`
+	Secret                 string   `json:"secret"` // web / machine。空なら生成してログに出す
+	IDTokenAlg             string   `json:"id_token_alg"`
+	AllowInsecureLocalhost bool     `json:"allow_insecure_localhost"`
+}
+
+// registerClientsFromFile は JSON ファイルのクライアントを登録する。既に同じ client_id があれば
+// 変更せずに飛ばす（Store に更新操作はない。変えたいときは DB を作り直す）。
+func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read clients %s: %w", path, err)
+	}
+	var specs []clientSpec
+	if err := json.Unmarshal(data, &specs); err != nil {
+		return fmt.Errorf("parse clients %s: %w", path, err)
+	}
+	now := time.Now()
+	for _, sp := range specs {
+		if _, err := store.GetClient(ctx, sp.ClientID); err == nil {
+			logger.Info("client already registered", "client_id", sp.ClientID)
+			continue
+		} else if !errors.Is(err, storage.ErrNotFound) {
+			return err
+		}
+		var (
+			c      *client.Client
+			secret client.Secret
+		)
+		switch client.Profile(sp.Profile) {
+		case client.ProfileWeb:
+			c, secret, err = client.NewWeb(client.WebParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, RedirectURIs: sp.RedirectURIs,
+				Scopes: sp.Scopes, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
+		case client.ProfileNative:
+			c, err = client.NewNative(client.NativeParams{ID: sp.ClientID, Name: sp.Name, RedirectURIs: sp.RedirectURIs,
+				Scopes: sp.Scopes, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
+		case client.ProfileMachine:
+			c, secret, err = client.NewMachine(client.MachineParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, Scopes: sp.Scopes}, now)
+		default:
+			return fmt.Errorf("client %s: unknown profile %q", sp.ClientID, sp.Profile)
+		}
+		if err != nil {
+			return fmt.Errorf("client %s: %w", sp.ClientID, err)
+		}
+		if err := store.CreateClient(ctx, c); err != nil {
+			return fmt.Errorf("client %s: %w", sp.ClientID, err)
+		}
+		attrs := []any{"client_id", c.ID, "profile", c.Profile}
+		if secret != "" && sp.Secret == "" {
+			attrs = append(attrs, "generated_secret", string(secret)) // 1 回しか得られないので表示する
+		}
+		logger.Info("registered client from file", attrs...)
+	}
 	return nil
 }
 
