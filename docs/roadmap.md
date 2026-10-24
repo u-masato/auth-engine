@@ -174,6 +174,11 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - `cli-client` は `-resource` を直接与えるだけでなく、`-mcp` で MCP 仕様「Authorization Server Location」の手順（401 → `resource_metadata` → `authorization_servers`）を実際に辿る。`oauthclient.DiscoverResource` はメタデータの `resource` が要求した URL と一致しないと拒否する（RFC 9728 §3.3）。
   - loginapp は redirect URI のホスト名を MCP 以外の Profile でも出す（表示する情報を Profile で分けない方が単純で、Native の loopback にも同じ注意書きが当てはまる）。`client_uri` はエンジンが到達性を確認していないのでリンクにせず文字列で出す。
   - `-cimd` は既定で有効にした。デモサーバーは MCP 連携を試す入口でもあるため。本番の組み込みでは `Config.CIMD` を明示的に与える（`docs/embedding.md`）。
+- **タスク 8（2026-10-25 完了）**: `tests/mcp_test.go`（E2E 4 本。CIMD Client → `resource` 付き認可 → JWT / Opaque 各形式を `resourceserver` が受理し別 resource 向けは拒否、Revocation の反映の差、`insufficient_scope` からの step-up で Grant の scope が和集合になる、Refresh での resource 乗り換え拒否、`invalid_target` / resource 欠落 / scope 上限超過 / 形式混在 / redirect 不一致 / 取得できない文書、CIMD 文書の差し替えがキャッシュ切れ後に効く）。相互運用は MCP Inspector v2.12.0（CLI）で CIMD + PKCE + `resource` の完全フローと `tools/list` / `tools/call` を確認し、手順・結果・未実施項目を [`docs/mcp-interop.md`](mcp-interop.md) に記録。再現スクリプトは `conformance/mcp-inspector.sh`。計画との差分と補足:
+  - `cmd/mcp-server` に最小の MCP（Streamable HTTP の `initialize` / `ping` / `tools/list` / `tools/call`、`whoami` ツール。`cmd/mcp-server/mcp.go`）を実装した。タスク 7 では「MCP プロトコル自体は実装しない」としたが、公式クライアントは認可後に `initialize` を送るので、接続まで確かめるには最小限が要る。SSE・セッション・通知は実装しない。
+  - Inspector の相互運用は Web UI ではなく CLI で行った（疑似 TTY と curl で自動承認のデモに対して無人で再現できる）。Web UI は未実施として文書に明記した。
+  - `tests/e2e_test.go` に `newSystemWith`（`Config` の差し替え）と `registerMachine` を足した。
+  - `demo.sh` の CIMD 文書は Inspector の CLI / TUI / Web のコールバックを既定で `redirect_uris` に含める（`DEMO_CIMD_REDIRECT_URIS`）。
 
 ### M3 で明示的に先送りするもの
 
