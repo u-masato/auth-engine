@@ -116,6 +116,15 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("authengine: Resources: %w", err)
 	}
+	// JWT を発行する resource の署名アルゴリズムに対応する署名鍵があることを起動時に確認する。
+	for _, uri := range resources.URIs() {
+		r, _ := resources.Lookup(uri)
+		if alg := r.EffectiveAlg(); alg != "" {
+			if _, err := cfg.Keys.SigningKey(alg); err != nil {
+				return nil, fmt.Errorf("authengine: Resources: %s requires a %s signing key in Keys", uri, alg)
+			}
+		}
+	}
 
 	var clk clock.Clock = clock.Real{}
 	if cfg.Now != nil {
@@ -145,13 +154,17 @@ func New(cfg Config) (*Engine, error) {
 		CodeTTL:        cfg.CodeTTL,
 	}
 	e.Token = &token.Service{
-		Clients:             cfg.Store,
-		Store:               cfg.Store,
-		Grants:              cfg.Store,
-		Clock:               clk,
-		Logger:              logger,
-		IDTokens:            e.IDTokens,
-		Resources:           resources,
+		Clients:   cfg.Store,
+		Store:     cfg.Store,
+		Grants:    cfg.Store,
+		Clock:     clk,
+		Logger:    logger,
+		IDTokens:  e.IDTokens,
+		Resources: resources,
+		Issuer: token.ByFormat{
+			resource.FormatOpaque: token.OpaqueIssuer{},
+			resource.FormatJWT:    &token.JWTIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys},
+		},
 		RefreshTokenTTL:     refreshTTL,
 		RefreshTokenIdleTTL: refreshIdle,
 	}

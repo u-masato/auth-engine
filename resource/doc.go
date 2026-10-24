@@ -11,7 +11,8 @@
 //     §2.1 認可要求での resource、§2.2 トークン要求での resource
 //   - RFC 3986 §6.2.2.1 Case Normalization（scheme と host の小文字化）
 //   - MCP Authorization Specification「Canonical Server URI」（大文字の受理、末尾スラッシュは区別）
-//   - RFC 9068 JWT Profile for OAuth 2.0 Access Tokens（AccessTokenFormat が FormatJWT のとき。M3 タスク 3）
+//   - RFC 9068 JWT Profile for OAuth 2.0 Access Tokens（AccessTokenFormat が FormatJWT のとき。
+//     署名アルゴリズムは AccessTokenAlg で選び、§4 のとおり既定は RS256）
 //
 // このパッケージは他のコアパッケージを import しない葉パッケージである。client と authorization が
 // 参照する。

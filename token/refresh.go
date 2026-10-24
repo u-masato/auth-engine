@@ -71,7 +71,7 @@ func (s *Service) refresh(ctx context.Context, c *client.Client, req Request) (*
 	if err != nil {
 		return nil, err
 	}
-	access, accessPlain, err := s.newAccessToken(c, family, scopes, audience, now)
+	access, accessPlain, err := s.issueAccessToken(ctx, c, family, scopes, audience, now)
 	if err != nil {
 		return nil, err
 	}
