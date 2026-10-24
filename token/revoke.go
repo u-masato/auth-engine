@@ -51,6 +51,11 @@ func (s *Service) Revoke(ctx context.Context, req RevocationRequest) error {
 	return nil
 }
 
+// errNoSuchToken は、探している種別のトークンが存在しない（次の種別を探す）ことを表す。
+// Store の ErrNotFound をそのまま使わないのは、Family の欠落のような下位の ErrNotFound を
+// 「この種別ではない」と取り違えて黙って成功にしないため。
+var errNoSuchToken = errors.New("token: no such token")
+
 // revoke は owner が空なら所有者を問わず、空でなければ owner に発行されたトークンだけを失効させる。
 func (s *Service) revoke(ctx context.Context, plaintext, hint, owner string) (bool, error) {
 	if plaintext == "" {
@@ -68,7 +73,7 @@ func (s *Service) revoke(ctx context.Context, plaintext, hint, owner string) (bo
 		} else {
 			found, err = s.revokeRefresh(ctx, hash, owner, now)
 		}
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, errNoSuchToken) {
 			continue
 		}
 		return found, err
@@ -76,11 +81,11 @@ func (s *Service) revoke(ctx context.Context, plaintext, hint, owner string) (bo
 	return false, nil
 }
 
-// revokeAccess は Access Token を失効させる。見つからなければ storage.ErrNotFound。
+// revokeAccess は Access Token を失効させる。見つからなければ errNoSuchToken。
 func (s *Service) revokeAccess(ctx context.Context, hash, owner string, now time.Time) (bool, error) {
 	at, _, err := s.Store.LookupAccessToken(ctx, hash)
 	if errors.Is(err, storage.ErrNotFound) {
-		return false, err
+		return false, errNoSuchToken
 	}
 	if err != nil {
 		return false, fmt.Errorf("token: lookup access token: %w", err)
@@ -88,17 +93,20 @@ func (s *Service) revokeAccess(ctx context.Context, hash, owner string, now time
 	if owner != "" && at.ClientID != owner {
 		return false, nil
 	}
+	// 引いた直後に Purge で消えた場合は ErrNotFound になるので、失効済みとして扱う。
 	if err := s.Store.RevokeAccessToken(ctx, hash, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return false, fmt.Errorf("token: revoke access token: %w", err)
 	}
 	return true, nil
 }
 
-// revokeRefresh は Refresh Token の Family ごと失効させる（RFC 7009 §2.1）。見つからなければ storage.ErrNotFound。
+// revokeRefresh は Refresh Token の Family ごと失効させる（RFC 7009 §2.1）。見つからなければ errNoSuchToken。
+//
+// Refresh Token が参照する Family がないのは不整合なので、黙って成功にせず内部エラーにする。
 func (s *Service) revokeRefresh(ctx context.Context, hash, owner string, now time.Time) (bool, error) {
 	rt, err := s.Store.LookupRefreshToken(ctx, hash)
 	if errors.Is(err, storage.ErrNotFound) {
-		return false, err
+		return false, errNoSuchToken
 	}
 	if err != nil {
 		return false, fmt.Errorf("token: lookup refresh token: %w", err)
@@ -112,7 +120,7 @@ func (s *Service) revokeRefresh(ctx context.Context, hash, owner string, now tim
 			return false, nil
 		}
 	}
-	if err := s.Store.RevokeTokenFamily(ctx, rt.FamilyID, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
+	if err := s.Store.RevokeTokenFamily(ctx, rt.FamilyID, now); err != nil {
 		return false, fmt.Errorf("token: revoke token family: %w", err)
 	}
 	return true, nil

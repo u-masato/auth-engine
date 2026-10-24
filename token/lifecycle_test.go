@@ -1,11 +1,14 @@
 package token_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/storage"
 	"github.com/u-masato/auth-engine/token"
 )
 
@@ -154,5 +157,35 @@ func TestIntrospectRequiresConfidentialClient(t *testing.T) {
 	// 平文ではなくハッシュで検索しているので、ハッシュ値を提示しても見つからない
 	if in, _ := f.svc.Introspect(f.ctx, token.IntrospectionRequest{Token: rand.Hash(res.AccessToken), Credentials: m2m}); in.Active {
 		t.Fatal("hash must not be accepted as a token")
+	}
+}
+
+// missingFamilyStore は Refresh Token は残っているが Family 行だけが欠けた、不整合な Store を模す。
+type missingFamilyStore struct{ token.Store }
+
+func (missingFamilyStore) GetTokenFamily(context.Context, string) (*token.Family, error) {
+	return nil, storage.ErrNotFound
+}
+
+func (missingFamilyStore) RevokeTokenFamily(context.Context, string, time.Time) error {
+	return storage.ErrNotFound
+}
+
+// Family の欠落を「このトークンは存在しない」と取り違えて、黙って成功にしない。
+func TestRevokeRefreshTokenWithMissingFamilyIsInternalError(t *testing.T) {
+	f := newFixture(t)
+	res := f.exchangeForRefresh(t)
+	f.svc.Store = missingFamilyStore{f.store}
+
+	// RFC 7009 のエンドポイント（所有者を確かめる経路）: プロトコルエラーではなく内部エラー（HTTP 層で 500）
+	err := f.svc.Revoke(f.ctx, token.RevocationRequest{Token: res.RefreshToken, TokenTypeHint: token.HintRefreshToken, Credentials: f.webCreds()})
+	var perr *token.Error
+	if err == nil || errors.As(err, &perr) || !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("revoke with a missing family: want an internal error, got %v", err)
+	}
+	// Go API（所有者を問わない経路）も同じ。found=true を返さない
+	found, err := f.svc.RevokeToken(f.ctx, res.RefreshToken, "")
+	if err == nil || found {
+		t.Fatalf("RevokeToken with a missing family: want an internal error, got found=%v err=%v", found, err)
 	}
 }
