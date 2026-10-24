@@ -25,7 +25,7 @@
 | 操作 | 契約 | SQLite / PostgreSQL での実現 |
 | --- | --- | --- |
 | `TransitionTransaction(ctx, id, from, to, patch)` | 状態が `from` のときだけ `to` に更新。違えば `ErrStateConflict` | `UPDATE ... WHERE id=? AND status=?` の rows affected = 1 を確認 |
-| `ConsumeAuthorizationCode(ctx, codeHash, now)` | 未消費かつ未期限なら消費済みにして内容を返す。既消費なら `ErrCodeAlreadyUsed` **と元の Grant ID** を返す（再利用検知→失効のため）。不明なら `ErrNotFound` | `UPDATE codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL RETURNING ...`。0 行なら `SELECT` で既消費か不明かを判別。消費済み行は Code 期限まで残す |
+| `ConsumeAuthorizationCode(ctx, codeHash, now)` | 未消費かつ未期限なら消費済みにして内容を返す。既消費なら `ErrCodeAlreadyUsed` **と消費済みの Code 本体** を返す（Code が持つ Family ID で再利用検知→Token Family 失効）。不明・期限切れなら `ErrNotFound` | `UPDATE codes SET consumed_at=? WHERE code_hash=? AND consumed_at IS NULL RETURNING ...`。0 行なら `SELECT` で既消費か不明かを判別。消費済み行は Code 期限まで残す |
 | `RotateRefreshToken(ctx, oldHash, next RefreshToken, now)` | 旧トークンが `active` のときだけ `rotated` にし、新トークンを同じ Token Family に挿入。旧が `rotated` なら `ErrTokenReused` と Family ID を返す | 1 つの DB トランザクションで `UPDATE ... WHERE hash=? AND status='active'`（rows=1 確認）→ `INSERT` |
 | `IssueTokens(ctx, grantID, tokens)` | Grant が `active` のときだけ挿入。違えば `ErrGrantRevoked` | 1 トランザクションで Grant 行を読み（PostgreSQL は `FOR UPDATE`、SQLite は書込トランザクション自体が直列）→ `INSERT` |
 | `RevokeGrant(ctx, grantID, now)` | Grant と、それに属する全 Token Family・全トークンを失効 | 1 トランザクションで `UPDATE grants` → `UPDATE refresh_tokens` → `UPDATE access_tokens` |

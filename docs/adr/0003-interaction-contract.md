@@ -155,7 +155,7 @@ pending ──Complete──▶ completed ──Resume──▶ consumed
 | Interaction API のなりすまし | Bearer 認証、内部リスナーへの分離 |
 | 攻撃者が開始した Txn を被害者に完了させる（login CSRF 型） | エンジン側では Client の `state` と PKCE に依存（RFC 9700 §4.7）。Interaction App 側で「自アプリのセッションに Txn ID を紐づける」ことを推奨事項として文書化 |
 | AS Mix-Up | `iss` パラメータ（RFC 9207） |
-| Code の横取り・再利用 | PKCE S256 必須、Code 単回消費、再利用検知時は当該 Code 由来の Grant を失効（RFC 6749 §4.1.2、RFC 9700 §4.5） |
+| Code の横取り・再利用 | PKCE S256 必須、Code 単回消費、再利用検知時は当該 Code から作られた Token Family を失効（RFC 6749 §4.1.2、RFC 9700 §4.5）。Grant 自体は失効させず、同じユーザーの他デバイスのセッションを巻き込まない |
 | Interaction App が要求外の scope を付与 | `granted_scopes ⊆ requested_scopes` をエンジンが検証 |
 | 古い認証での `max_age` 違反 | `authenticated_at` をエンジンが検証 |
 
