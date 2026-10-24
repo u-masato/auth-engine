@@ -1,7 +1,8 @@
-go 1.26.10
+go 1.26.0
 
 use (
 	.
+	./adapters/postgres
 	./adapters/sqlite
 	./examples/standalone
 	./tests

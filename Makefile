@@ -1,6 +1,6 @@
 GO ?= go
 # go.work に列挙したモジュールのディレクトリ
-MODULES := . ./adapters/sqlite ./examples/standalone ./tests
+MODULES := . ./adapters/sqlite ./adapters/postgres ./examples/standalone ./tests
 
 .PHONY: test lint vet staticcheck vulncheck deps-check
 
