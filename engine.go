@@ -53,6 +53,7 @@ type Engine struct {
 	Authorization *authorization.Service
 	Token         *token.Service
 	IDTokens      *oidc.IDTokenIssuer
+	UserInfo      *oidc.UserInfoService
 }
 
 // New は Config を検証して Engine を組み立てる。
@@ -90,6 +91,7 @@ func New(cfg Config) (*Engine, error) {
 
 	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk}
 	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
+	e.UserInfo = &oidc.UserInfoService{Tokens: cfg.Store, Clock: clk}
 	e.Authorization = &authorization.Service{
 		Clients:        cfg.Store,
 		Store:          cfg.Store,

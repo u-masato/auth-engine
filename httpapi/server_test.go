@@ -261,6 +261,25 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 		t.Fatalf("stored token: %+v %v", at, err)
 	}
 
+	// /userinfo: Access Token で Grant の Claims を scope で絞って返す（OIDC Core §5.3）
+	ureq := httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	ureq.Header.Set("Authorization", "bearer "+res.AccessToken) // スキームは大文字小文字を区別しない
+	rec = e.do(e.public, ureq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("userinfo: %d %s", rec.Code, rec.Body)
+	}
+	var ui map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &ui)
+	if ui["sub"] != "alice" || ui["name"] != "Alice" {
+		t.Fatalf("userinfo claims: %s", rec.Body)
+	}
+	// POST フォームでも受ける
+	ureq = httptest.NewRequest(http.MethodPost, "/userinfo", strings.NewReader(url.Values{"access_token": {res.AccessToken}}.Encode()))
+	ureq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if rec = e.do(e.public, ureq); rec.Code != http.StatusOK {
+		t.Fatalf("userinfo POST: %d %s", rec.Code, rec.Body)
+	}
+
 	// Code の再利用は invalid_grant、発行済みトークンは失効
 	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_grant"`) {
@@ -269,6 +288,60 @@ func TestFullAuthorizationCodeFlow(t *testing.T) {
 	at, _, _ = e.store.LookupAccessToken(context.Background(), rand.Hash(res.AccessToken))
 	if at.Status != token.AccessRevoked {
 		t.Fatal("token from reused code must be revoked")
+	}
+	// 失効したトークンでの /userinfo は 401 invalid_token（RFC 6750 §3.1）
+	ureq = httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	ureq.Header.Set("Authorization", "Bearer "+res.AccessToken)
+	rec = e.do(e.public, ureq)
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Header().Get("WWW-Authenticate"), `error="invalid_token"`) {
+		t.Fatalf("userinfo revoked: %d %v", rec.Code, rec.Header())
+	}
+}
+
+func TestUserInfoErrors(t *testing.T) {
+	e := newEnv(t)
+	// 認証情報なし: 401、WWW-Authenticate に error なし
+	rec := e.do(e.public, httptest.NewRequest(http.MethodGet, "/userinfo", nil))
+	if rec.Code != http.StatusUnauthorized || rec.Header().Get("WWW-Authenticate") != `Bearer realm="userinfo"` {
+		t.Fatalf("no credentials: %d %v", rec.Code, rec.Header())
+	}
+	// 不明なトークン
+	req := httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer at_nope")
+	rec = e.do(e.public, req)
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Header().Get("WWW-Authenticate"), "invalid_token") {
+		t.Fatalf("unknown token: %d %v", rec.Code, rec.Header())
+	}
+	// ヘッダとフォームの両方
+	req = httptest.NewRequest(http.MethodPost, "/userinfo", strings.NewReader("access_token=x"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer y")
+	rec = e.do(e.public, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("both: %d", rec.Code)
+	}
+	// openid なしのトークン → 403 insufficient_scope
+	cookie, txnID, _ := e.authorize(func() url.Values { q := authorizeQuery(); q.Set("scope", "profile"); return q }())
+	rec = e.do(e.internal, e.interactionReq(http.MethodPost, "/transactions/"+txnID+"/complete", map[string]any{
+		"subject": "alice", "authenticated_at": now.Format(time.RFC3339), "granted_scopes": []string{"profile"}}))
+	var out struct {
+		ResumeURL string `json:"resume_url"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	rec = e.resume(out.ResumeURL, cookie)
+	cb, _ := url.Parse(rec.Header().Get("Location"))
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {cb.Query().Get("code")}, "redirect_uri": {redirectURI}, "code_verifier": {rfcVerifier}}
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if res.IDToken != "" {
+		t.Fatal("no id_token without openid")
+	}
+	req = httptest.NewRequest(http.MethodGet, "/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+res.AccessToken)
+	rec = e.do(e.public, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Header().Get("WWW-Authenticate"), `error="insufficient_scope"`) {
+		t.Fatalf("no openid: %d %v", rec.Code, rec.Header())
 	}
 }
 

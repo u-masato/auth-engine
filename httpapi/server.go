@@ -85,6 +85,8 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.HandleFunc("POST "+PathAuthorize, s.handleAuthorize)
 	mux.HandleFunc("GET "+PathResume, s.handleResume)
 	mux.HandleFunc("POST "+PathToken, s.handleToken)
+	mux.HandleFunc("GET "+PathUserInfo, s.handleUserInfo)
+	mux.HandleFunc("POST "+PathUserInfo, s.handleUserInfo)
 	mux.HandleFunc("GET "+PathJWKS, s.handleJWKS)
 	mux.HandleFunc("GET "+PathMetadata, s.handleMetadata)
 	mux.HandleFunc("GET "+PathOpenID, s.handleOpenIDConfiguration)
