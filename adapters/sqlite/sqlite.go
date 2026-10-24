@@ -28,7 +28,7 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite" // database/sql ドライバー "sqlite"
 
-	authengine "github.com/muno/auth-engine"
+	authengine "github.com/u-masato/auth-engine"
 )
 
 //go:embed migrations/*.sql

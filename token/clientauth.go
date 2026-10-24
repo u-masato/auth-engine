@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // Credentials はトークンエンドポイントで提示されたクライアントの資格情報（RFC 6749 §2.3）。

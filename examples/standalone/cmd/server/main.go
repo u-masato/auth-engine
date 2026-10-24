@@ -28,14 +28,14 @@ import (
 	"syscall"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/adapters/sqlite"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/examples/standalone/console"
-	"github.com/muno/auth-engine/examples/standalone/loginapp"
-	"github.com/muno/auth-engine/httpapi"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/storage"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/adapters/sqlite"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/examples/standalone/console"
+	"github.com/u-masato/auth-engine/examples/standalone/loginapp"
+	"github.com/u-masato/auth-engine/httpapi"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 func main() {

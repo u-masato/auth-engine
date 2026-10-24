@@ -3,8 +3,8 @@ package memory
 import (
 	"testing"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/storage/storagetest"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/storage/storagetest"
 )
 
 func TestContract(t *testing.T) {

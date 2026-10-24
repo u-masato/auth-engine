@@ -3,7 +3,7 @@ package authorization_test
 import (
 	"fmt"
 
-	"github.com/muno/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/authorization"
 )
 
 // ExampleVerifyS256 は PKCE の S256 検証（RFC 7636 §4.6）を、RFC 7636 Appendix B の値で確かめる。

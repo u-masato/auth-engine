@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/adapters/sqlite"
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/keys"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/adapters/sqlite"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/keys"
 )
 
 // ExampleOpen はファイル DB を開いて Engine に渡す。Open はマイグレーションを適用してから返すので、

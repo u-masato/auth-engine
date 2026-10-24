@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // RevokeToken はトークン平文を失効させる（Go API。ADR-0006 §5 の RevokeToken）。

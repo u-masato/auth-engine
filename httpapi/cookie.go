@@ -3,7 +3,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/muno/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/internal/rand"
 )
 
 // ブラウザ結合 Cookie（ADR-0003 §3）。

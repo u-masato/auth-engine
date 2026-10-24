@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // handleRevoke は /revoke（RFC 7009）。クライアント認証はトークンエンドポイントと同じ方式。

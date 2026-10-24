@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/clock"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/clock"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/token"
 )
 
 var now = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)

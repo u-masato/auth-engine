@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/muno/auth-engine/resource"
+	"github.com/u-masato/auth-engine/resource"
 )
 
 // validateResources は登録時の resource 一覧を検証する。各要素は resource.Normalize を通る

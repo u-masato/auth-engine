@@ -9,8 +9,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql の "pgx" ドライバー
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/adapters/postgres"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/adapters/postgres"
 )
 
 // ExampleOpen は DSN から接続し、マイグレーションを適用した Store を作る。

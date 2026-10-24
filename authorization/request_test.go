@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 type fakeResolver map[string]*client.Client

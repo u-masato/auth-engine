@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 const grantColumns = `id, client_id, subject, scopes, claims, status, created_at, updated_at, revoked_at`

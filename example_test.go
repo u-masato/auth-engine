@@ -5,10 +5,10 @@ import (
 	"log"
 	"time"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/keys"
-	"github.com/muno/auth-engine/resource"
-	"github.com/muno/auth-engine/storage/memory"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/keys"
+	"github.com/u-masato/auth-engine/resource"
+	"github.com/u-masato/auth-engine/storage/memory"
 )
 
 // ExampleNew は Engine を組み立てる最小の構成を示す。必須は Issuer・Store・Keys（RS256 の署名鍵を含む）の 3 つで、

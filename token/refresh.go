@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // refresh は refresh_token グラント（RFC 6749 §6）を Rotation 付きで処理する（RFC 9700 §4.14）。

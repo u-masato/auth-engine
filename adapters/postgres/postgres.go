@@ -28,8 +28,8 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql ドライバー "pgx"
 	"github.com/pressly/goose/v3"
 
-	authengine "github.com/muno/auth-engine"
-	"github.com/muno/auth-engine/storage"
+	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 //go:embed migrations/*.sql

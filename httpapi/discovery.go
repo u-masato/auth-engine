@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/muno/auth-engine/oidc"
+	"github.com/u-masato/auth-engine/oidc"
 )
 
 // metadata は RFC 8414 §2 の Authorization Server Metadata と OIDC Discovery 1.0 §3 の

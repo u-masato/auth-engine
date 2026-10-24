@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/keys"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/keys"
 )
 
 // JWTAccessTokenType は JWT Access Token の typ ヘッダ（RFC 9068 §2.1）。

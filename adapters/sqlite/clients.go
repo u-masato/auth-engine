@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/muno/auth-engine/client"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 const clientColumns = `id, profile, name, logo_uri, policy_uri, redirect_uris, scopes, resources, secret_hash,

@@ -1,10 +1,10 @@
-module github.com/muno/auth-engine/adapters/postgres
+module github.com/u-masato/auth-engine/adapters/postgres
 
 go 1.26.0
 
 require (
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/muno/auth-engine v0.0.0-00010101000000-000000000000
+	github.com/u-masato/auth-engine v0.0.0-00010101000000-000000000000
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
@@ -72,4 +72,4 @@ require (
 )
 
 // モノレポ内の開発用。コアを公開バージョンでタグ付けしたら require をその版に替えて削除する。
-replace github.com/muno/auth-engine => ../..
+replace github.com/u-masato/auth-engine => ../..

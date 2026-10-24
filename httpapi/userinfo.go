@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/muno/auth-engine/oidc"
+	"github.com/u-masato/auth-engine/oidc"
 )
 
 // handleUserInfo は UserInfo エンドポイント（OIDC Core §5.3）。GET と POST を受ける。

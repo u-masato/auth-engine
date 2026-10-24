@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	authengine "github.com/muno/auth-engine"
+	authengine "github.com/u-masato/auth-engine"
 )
 
 // エンドポイントのパス。Issuer 直下に固定する（ADR-0001 §2「選ばせない」）。

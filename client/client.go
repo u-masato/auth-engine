@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/resource"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/resource"
 )
 
 // トークン有効期間の既定値と上限（ADR-0004 §2）。

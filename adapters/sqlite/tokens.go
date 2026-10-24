@@ -6,10 +6,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/muno/auth-engine/authorization"
-	"github.com/muno/auth-engine/grant"
-	"github.com/muno/auth-engine/storage"
-	"github.com/muno/auth-engine/token"
+	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/grant"
+	"github.com/u-masato/auth-engine/storage"
+	"github.com/u-masato/auth-engine/token"
 )
 
 // ConsumeAuthorizationCode は 1 文の UPDATE ... RETURNING で原子的に消費する。

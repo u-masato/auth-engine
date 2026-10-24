@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/muno/auth-engine/internal/rand"
-	"github.com/muno/auth-engine/storage"
+	"github.com/u-masato/auth-engine/internal/rand"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 // token_type_hint の値（RFC 7009 §2.1、RFC 7662 §2.1）。

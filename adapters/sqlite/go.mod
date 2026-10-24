@@ -1,9 +1,9 @@
-module github.com/muno/auth-engine/adapters/sqlite
+module github.com/u-masato/auth-engine/adapters/sqlite
 
 go 1.26.0
 
 require (
-	github.com/muno/auth-engine v0.0.0-00010101000000-000000000000
+	github.com/u-masato/auth-engine v0.0.0-00010101000000-000000000000
 	github.com/pressly/goose/v3 v3.29.0
 	modernc.org/sqlite v1.61.0
 )
@@ -25,4 +25,4 @@ require (
 )
 
 // モノレポ内の開発用。コアを公開バージョンでタグ付けしたら require をその版に替えて削除する。
-replace github.com/muno/auth-engine => ../..
+replace github.com/u-masato/auth-engine => ../..
