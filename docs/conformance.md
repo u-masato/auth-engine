@@ -97,11 +97,20 @@ Basic OP プランの 35 モジュールのうち 30 は、`code_challenge` を�
 これはエンジンの不具合ではなく設計上の選択で、Suite 側に Basic OP プランで PKCE を常用させる
 設定はない（PKCE を使うのは FAPI 系と eKYC の Security Profile テストのみ）。
 
-したがって Basic OP の**認定は現状の設計では取れない**。選択肢は次のとおりで、どれを採るかは ADR の議論が必要:
+したがって Basic OP の**認定は現状の設計では取れない**。選択肢は次のとおり:
 
 1. 現状維持。Basic OP 認定は目標にせず、PKCE を使うプロファイル（FAPI 2.0 Security Profile など、M4 以降）で適合性を示す
 2. Conformance 実行専用の緩和（`AllowPKCEless` のような開発用フラグ）を置き、認定ではなく「PKCE 以外の実装の検証」に使う。CLAUDE.md の不変条件と ADR-0004 §5 に反するため、置くなら ADR で範囲を限定する
 3. Web Profile に限り PKCE を任意にする（RFC 9700 §2.1.1 は confidential クライアントに PKCE か `nonce` のどちらかを求めており、OIDC では `nonce` で代替できる）。ADR-0004 §1 の条件表の変更になる
+
+**判断（2026-10-24）: 1 を採る。** PKCE 必須は維持し、Basic OP 認定は目標にしない。理由:
+主な利用者（MCP クライアント、Native アプリ、BFF 経由の SPA）は PKCE を使うため制約にならず、
+ADR-0001「選ばせない」・ADR-0004 §5・RFC 9700 と整合する。2 は ADR-0004 §5 が却下したエスケープハッチであり、
+認定にも使えない（認定はデプロイされた設定に対して行う）。3 は `oidcc-ensure-request-without-nonce-succeeds-for-code-flow`
+（`nonce` なしでも成功を要求）があるため「PKCE か `nonce`」では足りず、Web Profile を素の RFC 6749 まで
+緩めることになる。将来 Basic OP 認定が必要になった場合は、Web Profile を緩めるのではなく ADR-0004 §5 に従って
+新しい Profile（例: confidential、PKCE は提示されれば検証・省略可）を追加し、その Profile のクライアントで
+認定を受ける。ADR の変更はその時点で行う。
 
 ### 評価できた 5 モジュール
 
@@ -123,9 +132,23 @@ Claims、Refresh、Code 再利用など）は、E2E テスト（`tests/lifecycle
 - エラーページを見せるテストで callback を待ってタイムアウト → `override` でエラーページの表示を待つ
 - `expected-skips.json` の `configuration-filename` がフルパスと照合されず「unexpected skip」→ `*basic-op.json`
 
+### Suite が確認した項目（評価できたモジュールのログより）
+
+- Discovery: 必須キーの存在、`token_endpoint_auth_methods_supported` が `client_secret_basic` を含むこと
+- JWKS: 公開鍵のみ（秘密鍵・対称鍵なし）、構造、全鍵に `kid`、`kid` の一意性、サポートされる kty / alg
+- 認可応答: `state` の一致、`code` の存在、`iss`（RFC 9207）
+- トークン応答・ID Token（PKCE 付きフロー）: 署名、`iss` / `aud` / `exp` / `iat` / `nonce` / `at_hash` / `auth_time`、UserInfo の `sub` 一致
+- WARNING は 0 件。INFO の "Skipped evaluation ... client jwks" は、設定に Client の JWKS（ID Token 暗号化用）を
+  置いていないための省略で、問題ではない
+
+REVIEW になった 2 件（および `oidcc-response-type-missing` の画面確認項目）は Suite の UI
+（`https://localhost.emobix.co.uk:8443/plan-detail.html?plan=<id>`）で撮影された画面を人が確認する。
+エンジンのエラーページは `httpapi.PlainErrorRenderer` の最小 HTML で、`invalid_request` と説明文を表示している。
+
 ### 未確認
 
-- `oidcc-server-rotate-keys` など PKCE を付けない 30 モジュールは評価できていない（上記）
+- `oidcc-server-rotate-keys` など PKCE を付けない 30 モジュールは評価できていない（上記）。`expected-failures.json` の
+  `oidcc-server-rotate-keys` の項目は到達していないため未検証
 - Refresh、Code 再利用、`prompt` / `max_age`、scope ごとの Claims は Suite では未評価（E2E のみ）
 
 ## 補足
