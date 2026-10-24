@@ -565,7 +565,7 @@ func testRotateConcurrent(t *testing.T, s authengine.Store) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			results <- s.RotateRefreshToken(ctx, rt.Hash, newRefresh(fmt.Sprint("next", i), f.ID), newAccess(fmt.Sprint("at", i), f.ID, g.ID), base.Add(time.Second))
+			results <- s.RotateRefreshToken(ctx, rt.Hash, newRefresh(fmt.Sprint("next", i), f.ID), newAccess(fmt.Sprint("rot-at", i), f.ID, g.ID), base.Add(time.Second))
 		}(i)
 	}
 	wg.Wait()
