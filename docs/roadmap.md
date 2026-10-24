@@ -1,6 +1,6 @@
 # ロードマップと M1 の実装順序
 
-- 状態: 採用（2026-10-24 合意）。**M1 は 2026-10-24 に完了**
+- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（M2 の Conformance Suite は実行準備まで）
 - 日付: 2026-10-24
 
 準拠仕様の段階（P0〜P3）は [rfcs.md](../rfcs.md) に従う。ここでは P0 を 2 つのマイルストーンに分け、M1 のタスク順序を決める。
@@ -76,8 +76,25 @@
 
 タスク 1〜3 と 4〜6 は互いに独立しており並行可能。7 はいつでも着手できる。8 は 1〜6 の後。
 
+## M2 の実施結果（2026-10-24）
+
+タスク 1〜9 を実施した。計画との差分と補足:
+
+- Refresh Token は絶対期限（30 日）とスライド期限（14 日）の両方を実装した（ADR-0006 §4 の「P0 は絶対期限のみでもよい」より踏み込んだ）。`Engine.Config.RefreshTokenTTL` / `RefreshTokenIdleTTL` で変更できる。
+- Refresh 応答の ID Token に元の `auth_time` / `amr` / `acr` を載せるため、Token Family にそれらの写しを持たせた（SQLite は migration `00002`）。`token.Store` に `GetTokenFamily` を追加。
+- scope 縮小は今回の Access Token にだけ効き、Family（後継 Refresh Token）の scope は変えない。
+- Introspection は confidential Client（Web / Machine）の認証を要求し、認証に通れば他 Client のトークンも参照できる（Resource Server は Machine Profile の Client として登録する想定）。public Client は `invalid_client`。
+- Revocation は他 Client・不明・失効済みのトークンに対して黙って 200 を返す。Refresh Token の失効は Family 全体を失効させる。
+- Grant の管理 API は `grant.Service`（`Find` / `List` / `Revoke`）として `Engine.Grants` に配線した。`grant.Store` に `ListGrantsBySubject` を追加。Interaction API の `GET /grants` は参照のみで、連携解除の HTTP API は置いていない。
+- OIDC 要求（`openid` scope）では `redirect_uri` を必須にした（OIDC Core §3.1.2.1）。OAuth 2.0 だけの要求は従来どおり登録 URI が 1 つなら省略できる。
+- PostgreSQL Adapter はプロセス内 Mutex を使わず、`SELECT ... FOR UPDATE` と CAS で原子性を担保する。契約テストは Testcontainers（`postgres:16`）で全件通過。
+- Conformance Suite は公開 Docker イメージがなく Maven ビルドが必要なため、設定・手順・想定結果（[conformance.md](conformance.md)）まで整備し、実行は次の作業とした。実行に必要なエンジン側の準備として `Config.AllowInsecureIssuer`、`client.WebParams.Secret`、loginapp の Cookie セッション（`prompt=none` / `prompt=login` / `max_age` の解釈）を追加した。
+- `go mod tidy` が各 `go.mod` の `go` 指示子を 1.26.10 に上げたことがあったため、1.26 に戻した。最低バージョンは Go 1.26 のまま。
+
 ## M2 で明示的に先送りするもの
 
 - JWT 形式の Access Token（RFC 9068）、`resource` の検証（M3）
 - `private_key_jwt`、PAR、DPoP、Token Exchange（M4）
 - Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
+- Conformance Suite の実行と結果の記録（[conformance.md](conformance.md) の「結果」）
+- Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ

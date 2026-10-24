@@ -66,9 +66,22 @@ func run(issuer, clientID string, scopes []string, timeout time.Duration) error 
 	if err != nil {
 		return err
 	}
-	fmt.Printf("token_type:   %s\n", tok.TokenType)
-	fmt.Printf("expires_in:   %d\n", tok.ExpiresIn)
-	fmt.Printf("scope:        %s\n", tok.Scope)
-	fmt.Printf("access_token: %s\n", tok.AccessToken)
+	fmt.Printf("token_type:    %s\n", tok.TokenType)
+	fmt.Printf("expires_in:    %d\n", tok.ExpiresIn)
+	fmt.Printf("scope:         %s\n", tok.Scope)
+	fmt.Printf("access_token:  %s\n", tok.AccessToken)
+	if tok.RefreshToken != "" {
+		fmt.Printf("refresh_token: %s\n", tok.RefreshToken)
+	}
+	if tok.IDToken != "" {
+		fmt.Printf("id_token:      %s\n", tok.IDToken)
+	}
+	if strings.Contains(tok.Scope, "openid") && md.UserInfoEndpoint != "" {
+		claims, err := flow.UserInfo(ctx, tok.AccessToken)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("userinfo:      %v\n", claims)
+	}
 	return nil
 }

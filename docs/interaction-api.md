@@ -1,6 +1,6 @@
 # Interaction API 仕様（Interaction App 実装者向け）
 
-- 対象バージョン: M1（2026-10-24）
+- 対象バージョン: M2（2026-10-24）
 - 設計の背景: [ADR-0003 Interaction App との契約](adr/0003-interaction-contract.md)
 - 参考実装: [examples/standalone/loginapp](../examples/standalone/loginapp/loginapp.go)
 
@@ -108,7 +108,7 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 | `granted_scopes` | 必須 | `request.scopes` の空でない部分集合。すべて拒否する場合は Reject を使う |
 | `amr` | 任意 | 認証方式（RFC 8176）。ID Token に転記 |
 | `acr` | 任意 | 認証コンテキスト。ID Token に転記 |
-| `claims` | 任意 | ID Token / UserInfo に載せる Claims のスナップショット（M2 以降で使用）。承認された scope に対応するものだけを渡す |
+| `claims` | 任意 | UserInfo に載せる Claims のスナップショット。エンジンは OIDC Core §5.4 の対応表に従い、付与された scope に対応する標準 Claims だけを返す（標準外の Claims はそのまま返す）。`sub` などエンジンが決める Claims は無視される。ID Token には載せない |
 
 成功: `200 {"resume_url": "https://as.example.com/authorize/resume?txn=...&token=rs_..."}`
 
@@ -141,9 +141,35 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 5. **`resume_url` をログに残さない。** 単回使用トークンを含む。
 6. **Interaction API を公開ネットワークに出さない。** 内部ネットワークか、少なくとも IP 制限の内側に置く。
 
-## 同意のスキップ
+## GET /grants?subject=...&client_id=...
 
-同じ `client_id` × `subject` に対する過去の同意（Grant）はエンジンが保持しているが、M1 では Interaction API からの参照手段を提供していない。M2 で `GET /grants?client_id=&subject=` を追加し、Interaction App が「既に同意済みの scope なら同意画面を省く」判断に使えるようにする予定である。
+同じ `client_id` × `subject` に対する過去の同意（Grant）を返す。`subject` は必須。`client_id` を付けると、その Client に対する有効な Grant だけ（0 または 1 件）を返す。付けなければ `subject` の有効な Grant をすべて返す（「連携済みアプリ一覧」用）。失効済みの Grant は含まない。
+
+```json
+{
+  "grants": [
+    {
+      "client_id": "web-app",
+      "subject": "user-42",
+      "scopes": ["openid", "profile"],
+      "created_at": "2026-10-01T09:00:00Z",
+      "updated_at": "2026-10-24T12:03:00Z"
+    }
+  ]
+}
+```
+
+Claims は返さない。`subject` がないときは `400 invalid_request`。
+
+### 同意のスキップ
+
+ログイン後に `GET /grants?subject={subject}&client_id={txn.client.client_id}` を呼び、`request.scopes` が返ってきた `scopes` に含まれていれば同意画面を省いて Complete してよい。ただし `request.prompt` に `consent` が含まれていれば必ず同意画面を出す。`prompt=none` で同意が足りない場合は `consent_required` で Reject する。
+
+Grant の `scopes` は過去の同意の和集合である。Complete の `granted_scopes` はその回に承認された scope だけを渡せばよく、エンジン側で和集合に加える。
+
+### 連携の解除
+
+「このアプリとの連携を解除する」操作は M2 では HTTP では提供せず、Go API `Engine.Grants.Revoke(ctx, clientID, subject)` で行う（Grant と配下の全トークンが失効する）。Interaction App が別プロセスの場合は、HTTP での提供が必要になった時点で `DELETE /grants` を追加する。
 
 ## Go から直接呼ぶ場合
 

@@ -75,7 +75,7 @@ func newSystem(t *testing.T, autoApprove bool) *system {
 	t.Cleanup(s.internal.Close)
 
 	login, err := loginapp.New(loginapp.Config{InteractionAPI: s.internal.URL, APIToken: apiToken, AutoApprove: autoApprove, AutoSubject: "alice",
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: s.clock})
 	if err != nil {
 		t.Fatal(err)
 	}

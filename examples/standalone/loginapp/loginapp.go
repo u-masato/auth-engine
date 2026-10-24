@@ -39,6 +39,8 @@ type Config struct {
 	AutoSubject string
 	HTTPClient  *http.Client
 	Logger      *slog.Logger
+	// Now は現在時刻（認証時刻と max_age の判定に使う）。nil なら time.Now。テスト用。
+	Now func() time.Time
 }
 
 // App は Interaction App。
@@ -63,6 +65,9 @@ func New(cfg Config) (*App, error) {
 	}
 	if a.cfg.AutoSubject == "" {
 		a.cfg.AutoSubject = "demo-user"
+	}
+	if a.cfg.Now == nil {
+		a.cfg.Now = time.Now
 	}
 	return a, nil
 }
@@ -216,7 +221,7 @@ func (a *App) handleGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this authorization request has already been handled; start again from the application", http.StatusConflict)
 		return
 	}
-	d := decide(r, txn, time.Now())
+	d := decide(r, txn, a.cfg.Now())
 	if d.Reject != "" {
 		// prompt=none でログインが必要: UI を出さずに Reject する
 		a.reject(w, r, txn.ID, d.Reject, "authentication is required but prompt=none was requested")
@@ -254,7 +259,7 @@ func (a *App) handlePost(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "username is required", http.StatusBadRequest)
 			return
 		}
-		d := decide(r, txn, time.Now())
+		d := decide(r, txn, a.cfg.Now())
 		if d.Session != nil && d.Session.Subject != username {
 			d = decision{Fresh: true} // 別のユーザーとしてログインし直した
 		}
@@ -272,7 +277,7 @@ func (a *App) approve(w http.ResponseWriter, r *http.Request, txn *Transaction, 
 		a.reject(w, r, txn.ID, "access_denied", "no scope was granted")
 		return
 	}
-	authenticatedAt := time.Now()
+	authenticatedAt := a.cfg.Now()
 	if d.Session != nil {
 		authenticatedAt = d.Session.AuthenticatedAt
 	}

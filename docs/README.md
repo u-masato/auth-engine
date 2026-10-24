@@ -15,8 +15,9 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0005 Storage Port](adr/0005-storage-port.md) | Port の粒度、Code 原子的消費・Rotation・Grant 失効の Adapter 側保証 |
 | [ADR-0006 トークン形式と Token Operations](adr/0006-tokens-and-token-operations.md) | Opaque AT + JWT ID Token、Mint / Reissue の却下 |
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
-| [ロードマップ](roadmap.md) | M1〜M4 と M1 のタスク順序 |
+| [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1 / M2 の実施結果 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
+| [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
 
 ## 技術スタック案に対する判断の要約
 

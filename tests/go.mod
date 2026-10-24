@@ -3,6 +3,7 @@ module github.com/muno/auth-engine/tests
 go 1.26.0
 
 require (
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/muno/auth-engine v0.0.0-00010101000000-000000000000
 	github.com/muno/auth-engine/adapters/sqlite v0.0.0-00010101000000-000000000000
 	github.com/muno/auth-engine/examples/standalone v0.0.0-00010101000000-000000000000

@@ -1,8 +1,8 @@
 // Package oauthclient は、エンジンに対して Authorization Code + PKCE を実行する
 // 最小限の OAuth 2.0 クライアントである。サンプル CLI と E2E テストで使う。
 //
-// 対応する仕様: RFC 6749 §4.1、RFC 7636（S256）、RFC 8252 §7.3（loopback redirect）、
-// RFC 8414（メタデータ取得）、RFC 9207（iss の検証）。
+// 対応する仕様: RFC 6749 §4.1 / §6、RFC 7009、RFC 7636（S256）、RFC 8252 §7.3（loopback redirect）、
+// RFC 8414（メタデータ取得）、RFC 9207（iss の検証）、OIDC Core §5.3（UserInfo）。
 package oauthclient
 
 import (
@@ -26,6 +26,10 @@ type Metadata struct {
 	Issuer                string `json:"issuer"`
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	RevocationEndpoint    string `json:"revocation_endpoint"`
+	IntrospectionEndpoint string `json:"introspection_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
 }
 
 // Discover は issuer のメタデータを取得する。
@@ -155,25 +159,88 @@ func (e *TokenError) Error() string {
 
 // Exchange は Code をトークンに交換する。
 func (f *CodeFlow) Exchange(ctx context.Context, code string) (*TokenResponse, error) {
-	form := url.Values{
+	return f.tokenRequest(ctx, url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {f.RedirectURI},
 		"code_verifier": {f.verifier},
+	})
+}
+
+// Refresh は Refresh Token で新しいトークンを得る（RFC 6749 §6）。scope は空なら省略。
+// 応答の refresh_token は Rotation された後継なので、呼び出し側は必ず差し替えること。
+func (f *CodeFlow) Refresh(ctx context.Context, refreshToken, scope string) (*TokenResponse, error) {
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+	if scope != "" {
+		form.Set("scope", scope)
 	}
-	if f.ClientSecret == "" {
-		form.Set("client_id", f.ClientID) // public クライアント
+	return f.tokenRequest(ctx, form)
+}
+
+// Revoke はトークンを失効させる（RFC 7009）。hint は "access_token" / "refresh_token" / 空。
+func (f *CodeFlow) Revoke(ctx context.Context, token, hint string) error {
+	form := url.Values{"token": {token}}
+	if hint != "" {
+		form.Set("token_type_hint", hint)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.Metadata.TokenEndpoint, strings.NewReader(form.Encode()))
+	res, err := f.HTTPClient.Do(f.formRequest(ctx, f.Metadata.RevocationEndpoint, form))
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		terr := &TokenError{Status: res.StatusCode}
+		_ = json.Unmarshal(body, terr)
+		return terr
+	}
+	return nil
+}
+
+// UserInfo は Access Token で UserInfo エンドポイントを呼ぶ（OIDC Core §5.3）。
+func (f *CodeFlow) UserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.Metadata.UserInfoEndpoint, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	res, err := f.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		terr := &TokenError{Status: res.StatusCode}
+		_ = json.Unmarshal(body, terr)
+		return nil, terr
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(body, &claims); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// formRequest はクライアント認証付きの form-urlencoded POST を組み立てる。
+// confidential なら Basic（RFC 6749 §2.3.1: form-urlencoded してから Basic）、public なら client_id をフォームに入れる。
+func (f *CodeFlow) formRequest(ctx context.Context, endpoint string, form url.Values) *http.Request {
+	if f.ClientSecret == "" {
+		form.Set("client_id", f.ClientID)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if f.ClientSecret != "" {
-		// RFC 6749 §2.3.1: form-urlencoded してから Basic
 		req.SetBasicAuth(url.QueryEscape(f.ClientID), url.QueryEscape(f.ClientSecret))
 	}
-	res, err := f.HTTPClient.Do(req)
+	return req
+}
+
+func (f *CodeFlow) tokenRequest(ctx context.Context, form url.Values) (*TokenResponse, error) {
+	res, err := f.HTTPClient.Do(f.formRequest(ctx, f.Metadata.TokenEndpoint, form))
 	if err != nil {
 		return nil, err
 	}
