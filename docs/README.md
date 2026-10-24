@@ -17,6 +17,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
 | [ADR-0008 MCP 連携](adr/0008-mcp-integration.md) | Resource Indicators と Audience、MCP Client Profile、CIMD Resolver、JWT Access Token、Resource Server ミドルウェア、DCR の不採用 |
 | [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1 / M2 の実施結果、M3 のタスク分解 |
+| [組み込みガイド](embedding.md) | エンジンを組み込む人向け。責務の分担、Store の選択、Client 登録、HTTP への公開、鍵、監査ログ、本番前の確認 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 | [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
 
