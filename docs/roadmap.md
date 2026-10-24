@@ -98,3 +98,48 @@
 - Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
 - Basic OP 認定（PKCE 必須を維持するため目標にしない。必要になれば新 Profile を追加して対応する。[conformance.md](conformance.md)「PKCE 必須との非互換」の判断）
 - Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ
+
+## M3 のタスク順序
+
+到達点: MCP クライアント（CIMD で識別、事前登録なし）が MCP サーバー（Resource Server）向けに `resource` 付きで認可を受け、対象リソースに結びついた Access Token を得る。MCP サーバー側は本リポジトリのミドルウェアで RFC 9728 のメタデータを公開し、Audience を検証できる。基準は [MCP Authorization Specification（2026-07-28）](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) と [CIMD draft-02（2026-07-06）](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document)（MCP 仕様は draft-00 を参照するが、AS 側の要件は draft-02 と矛盾しない）。
+
+### 着手前に合意した設計判断（[ADR-0008](adr/0008-mcp-integration.md)）
+
+M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次の判断は既存 ADR の記述を超えるため、2026-10-24 に合意して ADR-0008 に記録した。詳細と既存 ADR への影響は ADR-0008 を参照。
+
+1. **Resource Server の登録は静的設定。** `Engine.Config.Resources`（URI、表示名、Access Token 形式、許可 scope）で与え、Store には置かない。Resource Server はデプロイ単位で決まり、Client のように実行時に増えないため。要求された `resource` が設定にないものは `invalid_target`（RFC 8707 §2）。
+2. **登録済み Client の `resource` 制限。** ADR-0004 §2 の予約どおり `Client.Resources` を開放項目に加える。空なら設定済みの全 resource を要求でき、指定があればその範囲に限る。CIMD で識別する Client は事前登録がないので、常に設定済みの全 resource を要求できる。
+3. **Access Token の形式は resource ごとに決める。** JWT（RFC 9068）を使うかは Resource Server の都合なので、Client ではなく `Config.Resources` の項目で選ぶ。`resource` なしの要求は従来どおり Opaque。複数 `resource` を要求する場合は形式が揃っていること（揃わなければ `invalid_target`）。JWT でも Store に Access Token の行を持ち（Hash はトークン文字列の SHA-256）、Introspection と Revocation は形式に依らず同じ経路で動く。ただし JWT の失効は Resource Server がローカル検証する限り伝播しないことを明記する（ADR-0006 §1 の帰結）。
+4. **MCP Client Profile。** ADR-0004 §6 のとおり 4 つ目の Profile を追加する。public、`authorization_code` + `refresh_token`、PKCE S256、`token_endpoint_auth_method=none`（`private_key_jwt` は M4）、`resource` 必須（欠落は `invalid_request`）、Refresh Token は Native と同じく発行・Rotation（MCP 仕様 Security Considerations「Token Theft」）、`openid` scope 要求時は ID Token を発行する。redirect URI は CIMD 文書の `redirect_uris` と完全一致。ただし loopback はポート番号を無視し（RFC 8252 §7.3）、`http://localhost` も許可する（MCP 仕様「Communication Security」が localhost を明示的に許すため。Native Profile の既定とは異なる）。
+5. **CIMD の Resolver はコアの `cimd` パッケージ。** `client.Resolver` の実装を 2 つ重ねる（Store → CIMD）。`https://` で始まり path を持つ `client_id` だけを CIMD として扱う。取得は net/http（標準ライブラリなので ADR-0002 の依存制約には触れない）、リダイレクト追従なし、5 KB 上限、タイムアウト、RFC 6890 の特殊用途アドレスへの接続拒否（loopback は開発用フラグでのみ許可）。文書の `client_id` は URL と単純文字列比較で一致すること。`token_endpoint_auth_method` が `none` 以外、または `client_secret` を含む文書は拒否。キャッシュはプロセス内メモリで、HTTP の `Cache-Control` を尊重し上下限を設け、エラーと不正な文書はキャッシュしない。信頼ポリシー（ドメイン許可リスト等）は `cimd.TrustPolicy` インターフェースとして差し替え可能にし、既定は全許可。
+6. **Interaction API の追加。** `client.profile` に `mcp` を追加し、`client.client_uri` と `request.redirect_uri` を全 Profile で返す。MCP 仕様（CIMD Security）は同意画面で redirect URI のホスト名を表示することを MUST とするため、Interaction App が描けるようにする。`docs/interaction-api.md` の契約変更として明記する。
+7. **Resource Server 用ミドルウェアはコアモジュール内の `resourceserver` パッケージ。** 外部依存を増やさない（JWT 検証は `keys` 経由、Introspection は net/http）ので別モジュールにする理由がない。`Engine` には依存せず、別プロセスの MCP サーバーから単独で使える。
+8. **Dynamic Client Registration（RFC 7591）は実装しない。** MCP 2026-07-28 版で非推奨であり、CIMD が「事前関係なし」の場面を満たす。無認証の登録エンドポイントはごみ登録の経路になる。旧クライアントとの相互運用で必要になった時点で再検討する。
+
+### タスク
+
+依存関係の順に並べる。1〜3 が Resource Indicators とトークン、4〜5 が MCP Client（CIMD）、6 が Resource Server 側、7〜9 が結合と品質保証。
+
+| # | タスク | 内容 | 完了条件 |
+| --- | --- | --- | --- |
+| 1 | `resource` の検証（認可要求側） | `Config.Resources` と `resource.Resource`（URI は絶対 URI、fragment なし、scheme / host は小文字に正規化して比較。RFC 8707 §2、MCP「Canonical Server URI」）。`Client.Resources` の追加（ADR-0004 §2）。認可要求の `resource` を設定と Client の許可範囲で検証し、範囲外は `invalid_target`（リダイレクトしてよいエラー）。Txn と `AuthorizationCode` に `Resource` を保存。Store: Client と Code の列追加（memory / SQLite migration `00003` / PostgreSQL migration `00002`）と `storagetest` の更新 | 許可外・不正形式・未設定の `resource` が `invalid_target`、Code に `resource` が引き継がれる、3 Adapter の契約テスト通過 |
+| 2 | Audience 付き Access Token（トークン要求側） | `/token` の `resource` パラメータ（RFC 8707 §2.2）: `authorization_code` では Code の `resource` の部分集合、`refresh_token` では Family の部分集合への縮小、`client_credentials` では Client の許可範囲。`Family.Audience` と `AccessToken.Audience` の追加と保存。Introspection 応答に `aud`（RFC 7662 §2.2）。UserInfo は `openid` scope があれば `aud` に関わらず受理する（UserInfo は AS 自身のリソース）。Refresh の ID Token は従来どおり | Code の `resource` を超える要求が `invalid_target`、Introspection の `aud` 一致、`resource` なしの既存フローが変わらないこと |
+| 3 | `token.Issuer` と JWT Access Token | ADR-0007 §4 で予約した `token.Issuer` を実体化し、Opaque と JWT（RFC 9068）の 2 実装を置く。形式は `Config.Resources` の項目で選ぶ（合意事項 3）。JWT は `typ: at+jwt`、`iss` `sub` `aud` `exp` `iat` `jti` `client_id` `scope`、`auth_time` `acr` `amr`（RFC 9068 §2.2）、署名は `keys` の RS256 / ES256。JWT の Access Token も Store に行を持ち、Introspection / Revocation は Opaque と同じ経路。Discovery に追加する項目はない（RFC 8707 / 9068 はメタデータを定義しない） | JWT を `/jwks` で検証できる、`aud` が `resource` に一致、Revocation 後の Introspection が `active:false`、Opaque 側の既存テストが変わらないこと |
+| 4 | `client` MCP Profile と CIMD 文書の検証 | `ProfileMCP` を条件表に追加（合意事項 4）。`client.NewMCP(doc)`: CIMD 文書（`client_id` `client_name` `redirect_uris` 必須、`client_uri` `logo_uri` `scope` `grant_types` `token_endpoint_auth_method` を解釈）から `Client` を組み立てる純粋な検証。`client_id` の形式（https、path あり、userinfo / fragment なし、`.` `..` セグメントなし。CIMD §3）、`client_id` と文書 URL の一致（§4）、`token_endpoint_auth_method=none` 以外の拒否（§4.1）。redirect URI の照合規則（loopback ポート無視、`http://localhost` 許可、それ以外は完全一致）。ネットワークは触らない | 条件表と実装の一致テスト、CIMD 文書の正常・異常系のテーブルテスト、照合規則のテーブルテスト |
+| 5 | `cimd` Resolver と配線 | `cimd.Resolver`（`client.Resolver` 実装）: 取得（net/http、リダイレクト追従なし、5 KB 上限、タイムアウト、200 以外はエラー。CIMD §5、§8.6）、SSRF 対策（RFC 6890 特殊用途アドレスの拒否、開発用 `AllowLoopback`。§8.7）、メモリキャッシュ（`Cache-Control` 尊重、上下限、エラーはキャッシュしない。§5.2）、`TrustPolicy`。`client.ChainResolver`（Store → CIMD）を `Engine` が配線し、`Config.CIMD`（有効 / 無効、HTTP クライアント、上下限）で制御。Discovery に `client_id_metadata_document_supported: true`（§6）。Interaction API に `client.profile=mcp`、`client.client_uri`、`request.redirect_uri` を追加（合意事項 6）。`cimd/doc.go` に対応節を列挙 | `httptest` で CIMD 文書を配信し、URL `client_id` で認可要求が通る。`client_id` 不一致・リダイレクト・サイズ超過・特殊用途アドレス・`client_secret` 入り文書の拒否、キャッシュの有効期限、Store にある `client_id` が優先されること |
+| 6 | `resourceserver` ミドルウェア | MCP サーバー（Resource Server）に組み込む net/http ミドルウェア（合意事項 7）。(a) RFC 9728 のメタデータ `GET /.well-known/oauth-protected-resource[/{path}]`（`resource` `authorization_servers` `scopes_supported` `bearer_methods_supported=["header"]` `resource_name`）。(b) Bearer 検証: 未提示・無効は 401 と `WWW-Authenticate: Bearer resource_metadata="..." scope="..."`（RFC 9728 §5.1、MCP「Scope Selection Strategy」）、scope 不足は 403 と `error="insufficient_scope"` + 必要 scope + `resource_metadata`（MCP「Runtime Insufficient Scope Errors」）。(c) 検証方式を `TokenVerifier` で差し替え: Introspection（RFC 7662、Machine Profile の資格情報）と JWT ローカル検証（AS メタデータから `jwks_uri` を得て `keys` で検証、`typ=at+jwt`、`iss` `aud` `exp`、`alg` 許可リスト）。どちらも **Audience が自分自身であること** を必須で確認する（MCP「Token Handling」）。(d) 検証済みの主体（`sub` `client_id` `scope` `aud`）を `context.Context` に載せる補助。scope 階層の解釈はミドルウェアの責務にせず、ルートごとの必要 scope を利用者が与える | 他 resource 向けトークンの拒否（Opaque / JWT とも）、401 / 403 のヘッダー形式、メタデータの JSON、JWKS キャッシュと `kid` 不明時の再取得 |
+| 7 | `examples/standalone` と `oauthclient` | `cmd/server` に `-resources`（`Config.Resources` の静的設定）と `-cimd-allow-loopback` を追加。デモ MCP サーバー `cmd/mcp-server`（`resourceserver` を使い、`/mcp` に 401 / 403 / 200 を返す最小の Resource Server。MCP プロトコル自体は実装しない）。`oauthclient` に `resource` と CIMD `client_id`（文書を `httptest` または `cmd/cimd-host` で配信）を追加し、`cli-client` に `-resource` `-client-id-url` を追加。loginapp の同意画面に `client_uri` と redirect URI のホスト名を表示 | `go run` で AS・MCP サーバー・CLI を起動し、CIMD の `client_id` で `/mcp` にアクセスできる |
+| 8 | `tests/` E2E と MCP 相互運用 | E2E: CIMD Client → `resource` 付き認可 → Opaque / JWT 各形式で `resourceserver` が受理、別 resource 向けトークンの拒否、`insufficient_scope` からの step-up 再認可（scope の和集合で Grant が広がる）、`invalid_target`、CIMD 文書の差し替え（キャッシュ切れ後に redirect URI が変わる）。相互運用: 公式の MCP クライアント（MCP Inspector、または Go / TypeScript SDK のクライアント）を使い、CIMD + `resource` + PKCE の完全フローを確認する手順と結果を `docs/mcp-interop.md` に記録する。Conformance Suite と同様に手動実行でよい | CI で E2E が通る。相互運用の結果と未対応項目が文書化されている |
+| 9 | 文書 | ADR-0008 の状態更新と、ADR-0004（Profile 表に MCP、開放項目に `Resources`）、ADR-0006（JWT AT と Audience）、ADR-0007（`cimd` `resource` `resourceserver` の追加、`token.Issuer` の実体化）の修正。`docs/interaction-api.md` の契約変更、`docs/specifications.md` の P1 の状態、README、各パッケージ `doc.go` | — |
+
+タスク 1〜3 は直列。4 は 1 と並行可能。5 は 1 と 4 の後。6 は 2〜3 の後（JWT 検証と Introspection の `aud` を使う）。7〜8 は 5〜6 の後。
+
+### M3 で明示的に先送りするもの
+
+- Dynamic Client Registration（RFC 7591）。合意事項 8 のとおり実装しない
+- CIMD Client の `private_key_jwt`（RFC 7523、CIMD §4.1）。M4 の `private_key_jwt` と併せて実装し、そのとき `token_endpoint_auth_method=private_key_jwt` と `jwks` / `jwks_uri` を受理する
+- CIMD 文書の変更検知（`redirect_uris` や鍵の変更時の再同意・失効。CIMD §8）。M3 ではキャッシュ切れ後に新しい文書で上書きするだけで、Grant には触れない
+- `logo_uri` の事前取得とキャッシュ（CIMD §8.3）。Interaction App の責務とし、エンジンは URL を透過する
+- CIMD Client の永続化。M3 ではプロセス内キャッシュのみ。複数インスタンス構成でのキャッシュ共有は、必要になった時点で `cimd.Cache` の Store 実装を足す
+- Token Exchange（RFC 8693）による別 Audience への交換、DPoP（RFC 9449）によるトークン拘束（M4）
+- MCP Authorization Extensions（ext-auth リポジトリ）。コア仕様の範囲に留める

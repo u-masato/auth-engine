@@ -15,7 +15,8 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0005 Storage Port](adr/0005-storage-port.md) | Port の粒度、Code 原子的消費・Rotation・Grant 失効の Adapter 側保証 |
 | [ADR-0006 トークン形式と Token Operations](adr/0006-tokens-and-token-operations.md) | Opaque AT + JWT ID Token、Mint / Reissue の却下 |
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
-| [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1 / M2 の実施結果 |
+| [ADR-0008 MCP 連携](adr/0008-mcp-integration.md) | Resource Indicators と Audience、MCP Client Profile、CIMD Resolver、JWT Access Token、Resource Server ミドルウェア、DCR の不採用 |
+| [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1 / M2 の実施結果、M3 のタスク分解 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 | [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
 
@@ -47,3 +48,4 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 4. ADR-0006 の `Mint` / `Reissue` 却下
 5. ADR-0007 のパッケージ構成（3 層を文脈ごとに統合、Store インターフェースは使う側で定義、合成 Store はルート、永続化は公開フィールド + 規約）
 6. モジュールパスは `github.com/muno/auth-engine`、リポジトリ名は `auth-engine`
+7. ADR-0008 の MCP 連携の 8 点（Resource Server は静的設定、Access Token の形式は resource ごと、MCP Client Profile で `http://localhost` を許可、CIMD はコアの `cimd` パッケージ、Resource Server ミドルウェアはコアの `resourceserver` パッケージ、DCR は実装しない）。M3 着手前に合意
