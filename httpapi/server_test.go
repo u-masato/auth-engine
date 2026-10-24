@@ -763,3 +763,146 @@ func TestClientCredentialsGrant(t *testing.T) {
 		t.Fatalf("grant_types_supported: %s", rec.Body)
 	}
 }
+
+func TestRevocationAndIntrospection(t *testing.T) {
+	e := newEnv(t)
+	tokens := e.obtainTokens(t)
+	m2m, secret, err := client.NewMachine(client.MachineParams{ID: "rs", Name: "Resource Server", Scopes: []string{"api"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateClient(context.Background(), m2m); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path string, form url.Values, id, sec string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if id != "" {
+			req.SetBasicAuth(url.QueryEscape(id), url.QueryEscape(sec))
+		}
+		return e.do(e.public, req)
+	}
+
+	// Resource Server が Access Token を Introspection
+	rec := post("/introspect", url.Values{"token": {tokens.AccessToken}}, "rs", string(secret))
+	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("introspect: %d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	var in map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &in)
+	if in["active"] != true || in["client_id"] != "web" || in["sub"] != "alice" || in["scope"] != "openid profile" ||
+		in["token_type"] != "Bearer" || in["iss"] != issuer || in["exp"] != float64(now.Add(time.Hour).Unix()) || in["iat"] != float64(now.Unix()) {
+		t.Fatalf("introspection body: %s", rec.Body)
+	}
+	// Refresh Token は token_type なし
+	rec = post("/introspect", url.Values{"token": {tokens.RefreshToken}, "token_type_hint": {"refresh_token"}}, "rs", string(secret))
+	in = nil // Unmarshal は既存のマップに追記するので捨てる
+	_ = json.Unmarshal(rec.Body.Bytes(), &in)
+	if in["active"] != true || in["token_type"] != nil || in["client_id"] != "web" {
+		t.Fatalf("refresh introspection: %s", rec.Body)
+	}
+	// public クライアントは 401、token なしは 400
+	rec = post("/introspect", url.Values{"token": {tokens.AccessToken}, "client_id": {"cli"}}, "", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("public introspect: %d %s", rec.Code, rec.Body)
+	}
+	rec = post("/introspect", url.Values{}, "rs", string(secret))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("introspect without token: %d %s", rec.Code, rec.Body)
+	}
+
+	// 他 Client（cli）からの失効は黙って 200 で、効かない
+	rec = post("/revoke", url.Values{"token": {tokens.AccessToken}, "client_id": {"cli"}}, "", "")
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+		t.Fatalf("revoke by other client: %d %s", rec.Code, rec.Body)
+	}
+	rec = post("/introspect", url.Values{"token": {tokens.AccessToken}}, "rs", string(secret))
+	if !strings.Contains(rec.Body.String(), `"active":true`) {
+		t.Fatalf("token must still be active: %s", rec.Body)
+	}
+	// 所有者からの失効は効く。失効後の Introspection は {"active":false} だけ
+	rec = post("/revoke", url.Values{"token": {tokens.RefreshToken}}, "web", e.webSecret)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke: %d %s", rec.Code, rec.Body)
+	}
+	for _, tok := range []string{tokens.AccessToken, tokens.RefreshToken} {
+		rec = post("/introspect", url.Values{"token": {tok}}, "rs", string(secret))
+		if strings.TrimSpace(rec.Body.String()) != `{"active":false}` {
+			t.Fatalf("after revoke: %s", rec.Body)
+		}
+	}
+	// 誤ったシークレットは 401、token なしは 400
+	rec = post("/revoke", url.Values{"token": {"x"}}, "web", "wrong")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("revoke bad secret: %d", rec.Code)
+	}
+	rec = post("/revoke", url.Values{}, "web", e.webSecret)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("revoke without token: %d", rec.Code)
+	}
+	// Discovery
+	rec = e.do(e.public, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
+	for _, want := range []string{`"revocation_endpoint":"` + issuer + `/revoke"`, `"introspection_endpoint":"` + issuer + `/introspect"`,
+		`"introspection_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"]`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metadata missing %s: %s", want, rec.Body)
+		}
+	}
+}
+
+func TestInteractionListGrants(t *testing.T) {
+	e := newEnv(t)
+	// Grant がない間は空
+	rec := e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?subject=alice&client_id=web", nil))
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"grants":[]}` {
+		t.Fatalf("empty grants: %d %s", rec.Code, rec.Body)
+	}
+	e.obtainTokens(t) // alice が web に openid profile を同意
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?subject=alice&client_id=web", nil))
+	var body struct {
+		Grants []struct {
+			ClientID string   `json:"client_id"`
+			Subject  string   `json:"subject"`
+			Scopes   []string `json:"scopes"`
+		} `json:"grants"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusOK || len(body.Grants) != 1 || body.Grants[0].ClientID != "web" || body.Grants[0].Subject != "alice" ||
+		strings.Join(body.Grants[0].Scopes, " ") != "openid profile" {
+		t.Fatalf("grants: %d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "claims") {
+		t.Fatal("grants view must not expose claims")
+	}
+	// client_id なしは subject の全 Grant
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?subject=alice", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"client_id":"web"`) {
+		t.Fatalf("list grants: %d %s", rec.Code, rec.Body)
+	}
+	// subject なしは 400、認証なしは 401
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?client_id=web", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing subject: %d", rec.Code)
+	}
+	rec = e.do(e.internal, httptest.NewRequest(http.MethodGet, "/grants?subject=alice", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: %d", rec.Code)
+	}
+	// 連携解除後は消える
+	if err := e.store.RevokeGrant(context.Background(), mustGrantID(t, e), now); err != nil {
+		t.Fatal(err)
+	}
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?subject=alice&client_id=web", nil))
+	if strings.TrimSpace(rec.Body.String()) != `{"grants":[]}` {
+		t.Fatalf("after revoke: %s", rec.Body)
+	}
+}
+
+func mustGrantID(t *testing.T, e *env) string {
+	t.Helper()
+	g, err := e.store.FindGrant(context.Background(), "web", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g.ID
+}

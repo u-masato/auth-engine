@@ -45,6 +45,23 @@ func (s *Store) FindGrant(ctx context.Context, clientID, subject string) (*grant
 	return scanGrant(s.db.QueryRowContext(ctx, `SELECT `+grantColumns+` FROM grants WHERE client_id = ? AND subject = ?`, clientID, subject))
 }
 
+func (s *Store) ListGrantsBySubject(ctx context.Context, subject string) ([]*grant.Grant, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+grantColumns+` FROM grants WHERE subject = ? ORDER BY created_at, id`, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*grant.Grant{}
+	for rows.Next() {
+		g, err := scanGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // UpsertGrant は (client_id, subject) の一意制約を前提に、既存があれば grant.Merge の結果で更新する。
 func (s *Store) UpsertGrant(ctx context.Context, candidate *grant.Grant) (*grant.Grant, error) {
 	var result *grant.Grant

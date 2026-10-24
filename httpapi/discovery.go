@@ -15,13 +15,18 @@ type metadata struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 	JWKSURI               string `json:"jwks_uri"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint,omitempty"`
+	RevocationEndpoint    string `json:"revocation_endpoint"`
+	IntrospectionEndpoint string `json:"introspection_endpoint"`
 
 	ScopesSupported                   []string `json:"scopes_supported"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
 	ResponseModesSupported            []string `json:"response_modes_supported"`
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
-	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	// RFC 8414 §2: revocation は public クライアントも呼べる（none）。introspection は confidential のみ
+	RevocationEndpointAuthMethodsSupported    []string `json:"revocation_endpoint_auth_methods_supported"`
+	IntrospectionEndpointAuthMethodsSupported []string `json:"introspection_endpoint_auth_methods_supported"`
+	CodeChallengeMethodsSupported             []string `json:"code_challenge_methods_supported"`
 	// RFC 9207 §3
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
 
@@ -36,17 +41,21 @@ type metadata struct {
 
 func (s *Server) baseMetadata() metadata {
 	return metadata{
-		Issuer:                            s.engine.Issuer,
-		AuthorizationEndpoint:             s.endpoint(PathAuthorize),
-		TokenEndpoint:                     s.endpoint(PathToken),
-		JWKSURI:                           s.endpoint(PathJWKS),
-		UserInfoEndpoint:                  s.endpoint(PathUserInfo),
-		ScopesSupported:                   oidc.StandardScopes,
-		ResponseTypesSupported:            []string{"code"},
-		ResponseModesSupported:            []string{"query"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "client_credentials"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
-		CodeChallengeMethodsSupported:     []string{"S256"},
+		Issuer:                                     s.engine.Issuer,
+		AuthorizationEndpoint:                      s.endpoint(PathAuthorize),
+		TokenEndpoint:                              s.endpoint(PathToken),
+		JWKSURI:                                    s.endpoint(PathJWKS),
+		UserInfoEndpoint:                           s.endpoint(PathUserInfo),
+		RevocationEndpoint:                         s.endpoint(PathRevoke),
+		IntrospectionEndpoint:                      s.endpoint(PathIntrospect),
+		ScopesSupported:                            oidc.StandardScopes,
+		ResponseTypesSupported:                     []string{"code"},
+		ResponseModesSupported:                     []string{"query"},
+		GrantTypesSupported:                        []string{"authorization_code", "refresh_token", "client_credentials"},
+		TokenEndpointAuthMethodsSupported:          []string{"client_secret_basic", "client_secret_post", "none"},
+		RevocationEndpointAuthMethodsSupported:     []string{"client_secret_basic", "client_secret_post", "none"},
+		IntrospectionEndpointAuthMethodsSupported:  []string{"client_secret_basic", "client_secret_post"},
+		CodeChallengeMethodsSupported:              []string{"S256"},
 		AuthorizationResponseIssParameterSupported: true,
 	}
 }

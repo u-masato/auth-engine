@@ -410,6 +410,17 @@ func testGrant(t *testing.T, s authengine.Store) {
 	if err != nil || g3.ID != "g3" {
 		t.Fatalf("other client: %+v, %v", g3, err)
 	}
+	// subject による一覧は CreatedAt 昇順（同時刻は ID 順）で、他の subject を含まない
+	if _, err := s.UpsertGrant(ctx, newGrant("g4", "c1", "bob", "openid")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListGrantsBySubject(ctx, "alice")
+	if err != nil || len(list) != 2 || list[0].ID != "g1" || list[1].ID != "g3" || list[0].Claims["name"] != "Alice B" {
+		t.Fatalf("list by subject: %+v, %v", list, err)
+	}
+	if empty, err := s.ListGrantsBySubject(ctx, "nobody"); err != nil || len(empty) != 0 {
+		t.Fatalf("list unknown subject: %+v, %v", empty, err)
+	}
 
 	// 失効と再同意（revive）
 	if err := s.RevokeGrant(ctx, "g1", base.Add(2*time.Hour)); err != nil {
@@ -423,6 +434,12 @@ func testGrant(t *testing.T, s authengine.Store) {
 		t.Fatalf("revoke twice must be idempotent: %v", err)
 	}
 	wantErr(t, s.RevokeGrant(ctx, "nope", base), storage.ErrNotFound, "revoke unknown")
+
+	// 失効済みも一覧に含まれる（呼び出し側が Status で絞る）
+	list, _ = s.ListGrantsBySubject(ctx, "alice")
+	if len(list) != 2 || list[0].Active() || !list[1].Active() {
+		t.Fatalf("list must include revoked grants: %+v", list)
+	}
 
 	revived, err := s.UpsertGrant(ctx, newGrant("g1-again", "c1", "alice", "email"))
 	if err != nil {

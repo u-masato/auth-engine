@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/muno/auth-engine/authorization"
+	"github.com/muno/auth-engine/grant"
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/oidc"
@@ -56,8 +57,10 @@ type Engine struct {
 
 	Authorization *authorization.Service
 	Token         *token.Service
-	IDTokens      *oidc.IDTokenIssuer
-	UserInfo      *oidc.UserInfoService
+	// Grants は Grant の管理操作（一覧・連携解除）。Go API と Interaction API の GET /grants が使う。
+	Grants   *grant.Service
+	IDTokens *oidc.IDTokenIssuer
+	UserInfo *oidc.UserInfoService
 }
 
 // New は Config を検証して Engine を組み立てる。
@@ -109,6 +112,7 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk}
 	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
 	e.UserInfo = &oidc.UserInfoService{Tokens: cfg.Store, Clock: clk}
+	e.Grants = &grant.Service{Store: cfg.Store, Clock: clk}
 	e.Authorization = &authorization.Service{
 		Clients:        cfg.Store,
 		Store:          cfg.Store,

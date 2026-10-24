@@ -11,13 +11,15 @@ import (
 
 // エンドポイントのパス。Issuer 直下に固定する（ADR-0001 §2「選ばせない」）。
 const (
-	PathAuthorize = "/authorize"
-	PathResume    = "/authorize/resume"
-	PathToken     = "/token"
-	PathJWKS      = "/jwks"
-	PathUserInfo  = "/userinfo"
-	PathMetadata  = "/.well-known/oauth-authorization-server"
-	PathOpenID    = "/.well-known/openid-configuration"
+	PathAuthorize  = "/authorize"
+	PathResume     = "/authorize/resume"
+	PathToken      = "/token"
+	PathRevoke     = "/revoke"
+	PathIntrospect = "/introspect"
+	PathJWKS       = "/jwks"
+	PathUserInfo   = "/userinfo"
+	PathMetadata   = "/.well-known/oauth-authorization-server"
+	PathOpenID     = "/.well-known/openid-configuration"
 )
 
 // Config は HTTP 層の設定。
@@ -85,6 +87,8 @@ func (s *Server) PublicHandler() http.Handler {
 	mux.HandleFunc("POST "+PathAuthorize, s.handleAuthorize)
 	mux.HandleFunc("GET "+PathResume, s.handleResume)
 	mux.HandleFunc("POST "+PathToken, s.handleToken)
+	mux.HandleFunc("POST "+PathRevoke, s.handleRevoke)
+	mux.HandleFunc("POST "+PathIntrospect, s.handleIntrospect)
 	mux.HandleFunc("GET "+PathUserInfo, s.handleUserInfo)
 	mux.HandleFunc("POST "+PathUserInfo, s.handleUserInfo)
 	mux.HandleFunc("GET "+PathJWKS, s.handleJWKS)
@@ -100,6 +104,7 @@ func (s *Server) InteractionHandler() http.Handler {
 	mux.HandleFunc("GET /transactions/{id}", s.handleGetTransaction)
 	mux.HandleFunc("POST /transactions/{id}/complete", s.handleComplete)
 	mux.HandleFunc("POST /transactions/{id}/reject", s.handleReject)
+	mux.HandleFunc("GET /grants", s.handleListGrants)
 	return s.requireInteractionAuth(mux)
 }
 

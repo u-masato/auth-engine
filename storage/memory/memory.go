@@ -10,6 +10,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"sync"
 	"time"
 
@@ -181,6 +182,24 @@ func (s *Store) FindGrant(_ context.Context, clientID, subject string) (*grant.G
 		return nil, storage.ErrNotFound
 	}
 	return clone(s.grants[id]), nil
+}
+
+func (s *Store) ListGrantsBySubject(_ context.Context, subject string) ([]*grant.Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []*grant.Grant{}
+	for _, g := range s.grants {
+		if g.Subject == subject {
+			out = append(out, clone(g))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func (s *Store) RevokeGrant(_ context.Context, id string, now time.Time) error {

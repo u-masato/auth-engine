@@ -31,7 +31,7 @@ func TestNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.Authorization == nil || e.Token == nil || e.Authorization.Issuer != "https://as.example.com" || e.Clock == nil || e.IDTokens == nil ||
-		e.Token.IDTokens == nil || e.Token.Grants == nil || e.Token.RefreshTokenTTL != 30*24*time.Hour || e.Token.RefreshTokenIdleTTL != 14*24*time.Hour {
+		e.Token.IDTokens == nil || e.Token.Grants == nil || e.Grants == nil || e.Token.RefreshTokenTTL != 30*24*time.Hour || e.Token.RefreshTokenIdleTTL != 14*24*time.Hour {
 		t.Fatalf("engine not wired: %+v", e)
 	}
 	if time.Since(e.Clock.Now()) > time.Minute {
