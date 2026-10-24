@@ -14,7 +14,7 @@ M2 まで完了（2026-10-24）。API は安定していない。
   `client_credentials`、Revocation（RFC 7009）、Introspection（RFC 7662）、Grant 管理 API、
   PostgreSQL Adapter。OpenID Conformance Suite（Basic OP）はローカルで実行済みだが、PKCE 必須の設計と
   プランの前提が合わず大半のモジュールは評価できていない（[docs/conformance.md](docs/conformance.md)）
-- M3（MCP 連携: Resource Indicators、CIMD、JWT Access Token）に着手。タスク 7（`examples/standalone` の MCP サーバー・CIMD 配信・MCP クライアント）まで完了
+- M3（MCP 連携: Resource Indicators、CIMD、JWT Access Token）に着手。タスク 8（E2E と MCP Inspector との相互運用。[docs/mcp-interop.md](docs/mcp-interop.md)）まで完了
 
 ## 試す
 
@@ -58,6 +58,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 - [準拠仕様一覧](docs/specifications.md) — P0〜P3 の段階分け
 - [ロードマップ](docs/roadmap.md) — M1〜M4 とタスク順序、M1 / M2 の実施結果
 - [Conformance Suite](docs/conformance.md) — Basic OP プロファイルをローカルで回す手順と想定結果
+- [MCP 相互運用](docs/mcp-interop.md) — MCP Inspector で CIMD + PKCE + `resource` のフローを回す手順と結果
 
 ## 意図した制約
 

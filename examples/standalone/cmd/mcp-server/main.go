@@ -1,11 +1,12 @@
 // Command mcp-server は、resourceserver を組み込んだ最小の Resource Server（デモ MCP サーバー）である。
-// MCP プロトコル自体は実装せず、認可の部分だけを見せる。
+// 認可の部分を見せるのが目的で、MCP プロトコルは MCP クライアント（MCP Inspector、公式 SDK）が接続して
+// ツールを 1 つ呼べる最小限（initialize / ping / tools/list / tools/call、mcp.go）だけを実装する。
 //
 //	go run ./cmd/mcp-server -issuer http://localhost:8080
 //
 // 立てるルート（既定 :8090、resource は http://localhost:8090/mcp）:
 //   - GET /.well-known/oauth-protected-resource/mcp: RFC 9728 のメタデータ
-//   - GET|POST /mcp: scope mcp:read が要る。検証済みの主体を JSON で返す
+//   - POST /mcp: scope mcp:read が要る。MCP の Streamable HTTP エンドポイント。whoami ツールが検証済みの主体を返す
 //   - GET|POST /mcp/admin: scope mcp:write が要る（insufficient_scope の 403 を見せる用）
 //
 // トークンの検証は既定で JWT（RFC 9068）のローカル検証。認可サーバー側では、この resource を
@@ -86,7 +87,7 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 
 	mux := http.NewServeMux()
 	mux.Handle(p.MetadataPath(), p.MetadataHandler())
-	mux.Handle("/mcp", p.Protect(http.HandlerFunc(hello), "mcp:read"))
+	mux.Handle("/mcp", p.Protect(http.HandlerFunc(mcpHandler), "mcp:read"))
 	mux.Handle("/mcp/admin", p.Protect(http.HandlerFunc(hello), "mcp:write"))
 
 	ln, err := net.Listen("tcp", o.addr)

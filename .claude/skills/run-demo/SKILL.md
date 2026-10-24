@@ -36,6 +36,7 @@ CIMD 文書の配信（`cmd/cimd-host`、base+11、自己署名 TLS、`client_id
 `stop` は 3 つとも止める。「MCP で試して」「CIMD のクライアントで」「Resource Server に届くか」と言われたら `mcp-flow`
 （`-auto-approve` 起動なら承認まで全自動。通常起動なら `flow` と同じく URL をブラウザで開いて `flow-wait`）。
 MCP の同意画面には client_id のホスト名と redirect 先のホスト名、localhost の注意書きが出る。
+公式クライアント（MCP Inspector）で試すときは `conformance/mcp-inspector.sh tools/list`（手順は docs/mcp-interop.md）。
 `start` の残りの引数はそのまま server に渡る（`-clients ../../conformance/clients.json` など）。
 ポートを変えるときは `DEMO_PORT_BASE=8090 $S start` のように環境変数で指定する。
 公開 = base、Interaction API = base+1、ログイン画面 = base+2、開発者コンソール = base+3 で、issuer・login-url・console-url も追従する。

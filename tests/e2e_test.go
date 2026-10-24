@@ -58,6 +58,12 @@ func (s *system) advance(d time.Duration) {
 // Issuer は公開サーバーの URL なので、ハンドラは後から差し込む。
 func newSystem(t *testing.T, autoApprove bool) *system {
 	t.Helper()
+	return newSystemWith(t, autoApprove, nil)
+}
+
+// newSystemWith は Engine の Config を mod で書き換えてから起動する（Resources や CIMD を足す M3 のテスト用）。
+func newSystemWith(t *testing.T, autoApprove bool, mod func(*authengine.Config)) *system {
+	t.Helper()
 	ctx := context.Background()
 	s := &system{t: t, now: time.Now()}
 
@@ -90,10 +96,14 @@ func newSystem(t *testing.T, autoApprove bool) *system {
 	if err := s.keys.AddSigning(signing); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := authengine.New(authengine.Config{
+	cfg := authengine.Config{
 		Issuer: s.public.URL, Store: store, Keys: s.keys, Now: s.clock,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	}
+	if mod != nil {
+		mod(&cfg)
+	}
+	engine, err := authengine.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,6 +382,19 @@ func TestMetadataAndDiscovery(t *testing.T) {
 	if md.AuthorizationEndpoint != s.public.URL+"/authorize" || md.TokenEndpoint != s.public.URL+"/token" {
 		t.Fatalf("metadata: %+v", md)
 	}
+}
+
+// registerMachine は Machine Profile の Client（Resource Server や M2M の資格情報）を登録し、client_id と secret を返す。
+func (s *system) registerMachine(t *testing.T, id string, scopes []string) (string, string) {
+	t.Helper()
+	c, secret, err := client.NewMachine(client.MachineParams{ID: id, Name: id, Scopes: scopes}, s.clock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CreateClient(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	return c.ID, string(secret)
 }
 
 // registerRedirect は Web クライアントの redirect URI を差し替える（完全一致照合のため）。

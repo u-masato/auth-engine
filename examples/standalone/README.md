@@ -67,7 +67,7 @@ go run ./cmd/cli-client -client-id-url https://localhost:8444/demo-cli.json -mcp
 
 同意画面（loginapp）は MCP Client では `client_id` のホスト名と redirect URI のホスト名を名前と並べて出し、redirect URI が localhost / loopback なら「このコンピュータ上のアプリケーションに戻る」注意書きを添える（MCP 仕様 CIMD Security の MUST / SHOULD。[Interaction API 仕様](../../docs/interaction-api.md)「`profile` が `mcp` のとき」）。
 
-`cmd/mcp-server` は `resourceserver` パッケージの使用例で、MCP プロトコル自体は実装しない。`GET /.well-known/oauth-protected-resource/mcp` でメタデータを返し、`/mcp` は `mcp:read`、`/mcp/admin` は `mcp:write` を要求する（scope 不足は 403 `insufficient_scope`）。`-introspect -client-id ... -client-secret ...` で Introspection（RFC 7662）による検証に切り替えられる（そのときは Machine Profile の Client を `-clients` で登録し、resource は `opaque` でよい）。
+`cmd/mcp-server` は `resourceserver` パッケージの使用例。`GET /.well-known/oauth-protected-resource/mcp` でメタデータを返し、`/mcp` は `mcp:read`、`/mcp/admin` は `mcp:write` を要求する（scope 不足は 403 `insufficient_scope`）。`/mcp` は MCP クライアント（MCP Inspector、公式 SDK）が接続してツールを呼べるだけの最小の MCP（Streamable HTTP の `initialize` / `ping` / `tools/list` / `tools/call`。`whoami` ツールが検証済みの主体を返す）を話す。SSE やセッションは実装しない。公式クライアントとの確認手順は [docs/mcp-interop.md](../../docs/mcp-interop.md)。`-introspect -client-id ... -client-secret ...` で Introspection（RFC 7662）による検証に切り替えられる（そのときは Machine Profile の Client を `-clients` で登録し、resource は `opaque` でよい）。
 
 `.claude/skills/run-demo/scripts/demo.sh start` はこの 3 サーバーをまとめて起動し、`demo.sh mcp-flow` が 4 を実行する。
 
@@ -78,7 +78,7 @@ go run ./cmd/cli-client -client-id-url https://localhost:8444/demo-cli.json -mcp
 - `console/` — 開発者コンソール。Client の登録（Store に直接書く運用者の操作）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
 - `cmd/server/` — 上記を配線して起動する。`-resources` と CIMD の設定もここ
 - `cmd/cli-client/` — `oauthclient` を使う CLI。`-client-id-url` と `-mcp` で MCP クライアントになる
-- `cmd/mcp-server/` — `resourceserver` を組み込んだデモ MCP サーバー（Resource Server）
+- `cmd/mcp-server/` — `resourceserver` を組み込んだデモ MCP サーバー（Resource Server）。`mcp.go` が最小の MCP プロトコル
 - `cmd/cimd-host/` — CIMD 文書を自己署名 TLS で配るローカル開発用サーバー
 - `resources.json` — `-resources` の例（デモ MCP サーバーを JWT Access Token で登録）
 

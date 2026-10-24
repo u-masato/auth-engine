@@ -20,6 +20,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [組み込みガイド](embedding.md) | エンジンを組み込む人向け。責務の分担、Store の選択、Client 登録、HTTP への公開、鍵、監査ログ、本番前の確認 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 | [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
+| [MCP 相互運用](mcp-interop.md) | MCP Inspector（公式 MCP クライアント）で CIMD + PKCE + `resource` のフローを回す構成・手順・結果 |
 
 ## 技術スタック案に対する判断の要約
 

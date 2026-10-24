@@ -14,6 +14,8 @@
 #
 # 環境変数: DEMO_PORT_BASE（既定 8080。公開=base, Interaction=base+1, login=base+2, console=base+3,
 #                           MCP サーバー=base+10, CIMD 文書=base+11）
+#           DEMO_CIMD_REDIRECT_URIS（CIMD 文書の redirect_uris。既定は cli-client の loopback と MCP Inspector の
+#                           CLI / TUI（http://127.0.0.1:6276/oauth/callback）と Web（http://localhost:6274/oauth/callback））
 #           DEMO_DIR（既定 examples/standalone/.demo。DB・鍵・ログ・PID をここに置く）
 set -euo pipefail
 
@@ -43,6 +45,8 @@ RESOURCES_JSON="$DEMO_DIR/resources.json"
 MCP_URL="http://localhost:$MCP_PORT/mcp"
 CIMD_URL="https://localhost:$CIMD_PORT"
 CLIENT_ID_URL="$CIMD_URL/demo-cli.json"
+# loopback IP の redirect URI はポートを無視して照合される（RFC 8252 §7.3）が、http://localhost はポートまで完全一致。
+CIMD_REDIRECT_URIS="${DEMO_CIMD_REDIRECT_URIS:-http://127.0.0.1/callback http://127.0.0.1/oauth/callback http://localhost:6274/oauth/callback}"
 FLOW_OUT="$DEMO_DIR/flow.out"
 FLOW_PID="$DEMO_DIR/flow.pid"
 ISSUER="http://localhost:$PUBLIC_PORT"
@@ -129,7 +133,7 @@ cmd_start() {
   (cd "$APP" && go build -o "$BIN" ./cmd/server && go build -o "$MCP_BIN" ./cmd/mcp-server && go build -o "$CIMD_BIN" ./cmd/cimd-host)
 
   # 1. CIMD 文書の配信（自己署名証明書を初回に生成する。認可サーバーがその証明書を信頼する必要があるので先に起動）
-  nohup "$CIMD_BIN" -addr "127.0.0.1:$CIMD_PORT" -url "$CIMD_URL" -cert "$CIMD_CERT" -key "$CIMD_KEY" >"$CIMD_LOG" 2>&1 &
+  nohup "$CIMD_BIN" -addr "127.0.0.1:$CIMD_PORT" -url "$CIMD_URL" -cert "$CIMD_CERT" -key "$CIMD_KEY" -redirect-uris "$CIMD_REDIRECT_URIS" >"$CIMD_LOG" 2>&1 &
   echo $! >"$CIMD_PID_FILE"
   wait_ready cimd-host "$CIMD_PID_FILE" "$CIMD_LOG" || return 1
 
