@@ -1,4 +1,4 @@
-// Package keys は ID Token（将来は JWT Access Token）の署名鍵セットを管理する。
+// Package keys は ID Token と JWT Access Token（RFC 9068）の署名鍵セットを管理する。
 //
 // go-jose/v4 の利用はこのパッケージに閉じ込める（docs/adr/0002-tech-stack.md）。
 // 他のパッケージは Set.Sign / Set.Verify / Set.JWKS だけを使い、JOSE の型を直接扱わない。
@@ -6,6 +6,7 @@
 // 対応する仕様:
 //   - RFC 7515 JWS（compact serialization）、RFC 7517 JWK / JWK Set、RFC 7518 JWA
 //   - RFC 7519 JWT、RFC 8725 §3 アルゴリズムの固定（none / HS* を使わない、kid と alg を鍵側で検証）
+//   - RFC 9068 §2.1 JWT Access Token の typ ヘッダ（at+jwt。SignTyped / Header.Type）
 //   - RFC 7638 JWK Thumbprint（kid の生成）
 //   - OIDC Core §15.1 RS256 は OP の必須サポート
 //
@@ -106,6 +107,9 @@ func thumbprint(pub crypto.PublicKey) (string, error) {
 type Header struct {
 	KeyID string
 	Alg   string
+	// Type は typ ヘッダ（RFC 7515 §4.1.9）。ID Token は "JWT"、JWT Access Token は "at+jwt"（RFC 9068 §2.1）。
+	// Resource Server は at+jwt 以外を拒否して ID Token との混同を防ぐ（RFC 9068 §4）。
+	Type string
 }
 
 // Set は署名鍵と検証鍵の集まり。複数 goroutine から同時に使える。
@@ -196,11 +200,19 @@ func (s *Set) SigningAlgorithms() []string {
 // Sign は claims（複数可。後の値が前の値を上書き）を alg の署名鍵で署名した
 // compact JWS を返す。ヘッダには typ=JWT と kid を入れる。
 func (s *Set) Sign(alg string, claims ...any) (string, error) {
+	return s.SignTyped(alg, "JWT", claims...)
+}
+
+// SignTyped は typ ヘッダを指定して署名する。JWT Access Token は "at+jwt"（RFC 9068 §2.1）。
+func (s *Set) SignTyped(alg, typ string, claims ...any) (string, error) {
+	if typ == "" {
+		return "", errors.New("keys: typ header is required")
+	}
 	k, err := s.SigningKey(alg)
 	if err != nil {
 		return "", err
 	}
-	opts := (&jose.SignerOptions{}).WithType("JWT").WithHeader(jose.HeaderKey("kid"), k.ID)
+	opts := (&jose.SignerOptions{}).WithType(jose.ContentType(typ)).WithHeader(jose.HeaderKey("kid"), k.ID)
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.SignatureAlgorithm(alg), Key: k.private}, opts)
 	if err != nil {
 		return "", fmt.Errorf("keys: signer: %w", err)
@@ -239,7 +251,8 @@ func (s *Set) Verify(token string, out ...any) (*Header, error) {
 	if err := parsed.Claims(k.public, out...); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
-	return &Header{KeyID: k.ID, Alg: k.Alg}, nil
+	typ, _ := h.ExtraHeaders[jose.HeaderType].(string)
+	return &Header{KeyID: k.ID, Alg: k.Alg, Type: typ}, nil
 }
 
 // JWKS は公開鍵だけを含む JWK Set（RFC 7517 §5）の JSON を返す。/jwks の応答に使う。

@@ -48,8 +48,19 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			k, _ := s.SigningKey(alg)
-			if h.KeyID != k.ID || h.Alg != alg || got.Iss != "https://as.example.com" || got.Sub != "alice" || got.N != 7 {
+			if h.KeyID != k.ID || h.Alg != alg || h.Type != "JWT" || got.Iss != "https://as.example.com" || got.Sub != "alice" || got.N != 7 {
 				t.Fatalf("header=%+v claims=%+v", h, got)
+			}
+			// typ を指定して署名でき、検証側で読める（RFC 9068 §2.1 の at+jwt）
+			typed, err := s.SignTyped(alg, "at+jwt", claims{Sub: "bob"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if h, err := s.Verify(typed, &got); err != nil || h.Type != "at+jwt" || got.Sub != "bob" {
+				t.Fatalf("typed: header=%+v claims=%+v err=%v", h, got, err)
+			}
+			if _, err := s.SignTyped(alg, "", claims{}); err == nil {
+				t.Fatal("empty typ must be rejected")
 			}
 			// 別の Set では検証できない（kid 不明）
 			other := newSet(t, alg)

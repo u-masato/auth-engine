@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,8 +76,11 @@ func newEnv(t *testing.T) *env {
 	}
 	engine, err := authengine.New(authengine.Config{
 		Issuer: issuer, Store: e.store, Keys: e.keys, Now: func() time.Time { return e.now },
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Resources: []resource.Resource{{URI: "https://mcp.example.com", Name: "MCP"}, {URI: "https://api.example.com"}},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Resources: []resource.Resource{
+			{URI: "https://mcp.example.com", Name: "MCP"}, {URI: "https://api.example.com"},
+			{URI: "https://jwt.example.com", AccessTokenFormat: resource.FormatJWT, AccessTokenAlg: resource.AlgES256},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -835,6 +839,97 @@ func TestResourceIndicator(t *testing.T) {
 	plain := e.obtainTokens(t)
 	if in := introspect(plain.AccessToken); in["active"] != true || in["aud"] != nil {
 		t.Fatalf("token without resource must not carry aud: %v", in)
+	}
+}
+
+// TestJWTAccessToken は JWT を選んだ resource への発行（RFC 9068）。/jwks の鍵で検証でき、Revocation 後の Introspection は inactive。
+func TestJWTAccessToken(t *testing.T) {
+	e := newEnv(t)
+	q := authorizeQuery()
+	q.Set("resource", "https://jwt.example.com")
+	cookie, txnID, _ := e.authorize(q)
+	rec := e.resume(e.complete(txnID), cookie)
+	cb, _ := url.Parse(rec.Header().Get("Location"))
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {cb.Query().Get("code")}, "redirect_uri": {redirectURI}, "code_verifier": {rfcVerifier}}
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token: %d %s", rec.Code, rec.Body)
+	}
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+
+	// Resource Server と同じ手順: /jwks を取り、typ / alg / iss / aud / exp を確認する
+	rec = e.do(e.public, httptest.NewRequest(http.MethodGet, "/jwks", nil))
+	var jwks struct {
+		Keys []struct {
+			Kid string `json:"kid"`
+			Kty string `json:"kty"`
+		} `json:"keys"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &jwks)
+	var c struct {
+		Iss      string   `json:"iss"`
+		Aud      []string `json:"aud"`
+		Sub      string   `json:"sub"`
+		ClientID string   `json:"client_id"`
+		Scope    string   `json:"scope"`
+		Exp      int64    `json:"exp"`
+		AuthTime int64    `json:"auth_time"`
+		AMR      []string `json:"amr"`
+	}
+	h, err := e.keys.Verify(res.AccessToken, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(jwks.Keys, func(k struct {
+		Kid string `json:"kid"`
+		Kty string `json:"kty"`
+	}) bool {
+		return k.Kid == h.KeyID && k.Kty == "EC"
+	}) {
+		t.Fatalf("signing key %s must be published in /jwks: %s", h.KeyID, rec.Body)
+	}
+	if h.Type != token.JWTAccessTokenType || h.Alg != keys.AlgES256 || c.Iss != issuer || !slices.Equal(c.Aud, []string{"https://jwt.example.com"}) ||
+		c.Sub != "alice" || c.ClientID != "web" || c.Scope != "openid profile" || c.Exp != now.Add(time.Hour).Unix() ||
+		c.AuthTime != now.Add(-time.Minute).Unix() || !slices.Equal(c.AMR, []string{"pwd"}) {
+		t.Fatalf("jwt access token: header=%+v claims=%+v", h, c)
+	}
+	// ID Token の at_hash は JWT 文字列から計算されている
+	var idc struct {
+		ATHash string `json:"at_hash"`
+	}
+	if _, err := e.keys.Verify(res.IDToken, &idc); err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := oidc.AccessTokenHash(keys.AlgRS256, res.AccessToken); idc.ATHash != want {
+		t.Fatalf("at_hash = %q, want %q", idc.ATHash, want)
+	}
+
+	// Introspection と Revocation は Opaque と同じ経路
+	rs, secret, err := client.NewMachine(client.MachineParams{ID: "rs", Name: "Resource Server", Scopes: []string{"api"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateClient(context.Background(), rs); err != nil {
+		t.Fatal(err)
+	}
+	introspect := func() string {
+		req := httptest.NewRequest(http.MethodPost, "/introspect", strings.NewReader(url.Values{"token": {res.AccessToken}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rs", string(secret))
+		return e.do(e.public, req).Body.String()
+	}
+	if body := introspect(); !strings.Contains(body, `"active":true`) || !strings.Contains(body, `"aud":["https://jwt.example.com"]`) {
+		t.Fatalf("introspection before revoke: %s", body)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/revoke", strings.NewReader(url.Values{"token": {res.AccessToken}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth("web", e.webSecret)
+	if rec := e.do(e.public, req); rec.Code != http.StatusOK {
+		t.Fatalf("revoke: %d %s", rec.Code, rec.Body)
+	}
+	if body := introspect(); strings.TrimSpace(body) != `{"active":false}` {
+		t.Fatalf("introspection after revoke: %s", body)
 	}
 }
 

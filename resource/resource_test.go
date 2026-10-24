@@ -196,3 +196,30 @@ func TestScopeLimits(t *testing.T) {
 		t.Errorf("nil set must not allow non-OIDC scopes for an audience: %v", dis)
 	}
 }
+
+func TestAccessTokenAlg(t *testing.T) {
+	cases := []struct {
+		r       Resource
+		wantAlg string
+		ok      bool
+	}{
+		{Resource{URI: "https://a.example.com"}, "", true},
+		{Resource{URI: "https://a.example.com", AccessTokenFormat: FormatJWT}, AlgRS256, true},
+		{Resource{URI: "https://a.example.com", AccessTokenFormat: FormatJWT, AccessTokenAlg: AlgES256}, AlgES256, true},
+		{Resource{URI: "https://a.example.com", AccessTokenFormat: FormatJWT, AccessTokenAlg: "HS256"}, "", false},
+		{Resource{URI: "https://a.example.com", AccessTokenAlg: AlgRS256}, "", false}, // Opaque に alg は指定できない
+	}
+	for i, c := range cases {
+		err := c.r.Validate()
+		if (err == nil) != c.ok {
+			t.Errorf("case %d: Validate = %v, want ok=%v", i, err, c.ok)
+			continue
+		}
+		if c.ok && c.r.EffectiveAlg() != c.wantAlg {
+			t.Errorf("case %d: EffectiveAlg = %q, want %q", i, c.r.EffectiveAlg(), c.wantAlg)
+		}
+		if !c.ok && !errors.Is(err, ErrInvalid) {
+			t.Errorf("case %d: want ErrInvalid, got %v", i, err)
+		}
+	}
+}
