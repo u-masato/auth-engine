@@ -97,7 +97,7 @@ func writeMetadata(w http.ResponseWriter, m metadata) {
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	body, err := s.engine.Keys.JWKS()
 	if err != nil {
-		s.internalError(w, r, err)
+		s.jsonInternalError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

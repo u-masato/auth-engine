@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -24,12 +23,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		Token: r.PostForm.Get("token"), TokenTypeHint: r.PostForm.Get("token_type_hint"), Credentials: creds,
 	})
 	if err != nil {
-		var perr *token.Error
-		if errors.As(err, &perr) {
-			s.writeTokenError(w, r, perr)
-			return
-		}
-		s.internalError(w, r, err)
+		s.writeTokenFailure(w, r, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -66,12 +60,7 @@ func (s *Server) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		Token: r.PostForm.Get("token"), TokenTypeHint: r.PostForm.Get("token_type_hint"), Credentials: creds,
 	})
 	if err != nil {
-		var perr *token.Error
-		if errors.As(err, &perr) {
-			s.writeTokenError(w, r, perr)
-			return
-		}
-		s.internalError(w, r, err)
+		s.writeTokenFailure(w, r, err)
 		return
 	}
 	body := introspectionBody{Active: in.Active}

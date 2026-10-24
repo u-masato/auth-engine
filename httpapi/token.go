@@ -32,12 +32,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.engine.Token.Exchange(r.Context(), req)
 	if err != nil {
-		var perr *token.Error
-		if errors.As(err, &perr) {
-			s.writeTokenError(w, r, perr)
-			return
-		}
-		s.jsonInternalError(w, r, err)
+		s.writeTokenFailure(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -73,6 +68,18 @@ func clientCredentials(r *http.Request) (token.Credentials, *token.Error) {
 		return token.Credentials{ClientID: formID, Secret: formSecret[0], Method: client.AuthClientSecretPost}, nil
 	}
 	return token.Credentials{ClientID: formID, Method: client.AuthNone}, nil
+}
+
+// writeTokenFailure は Token Service（Exchange / Revoke / Introspect）の失敗を返す。
+// *token.Error はプロトコルエラー（RFC 6749 §5.2）、それ以外は内部障害として JSON の 500 にする。
+// これらのエンドポイントの呼び出し元は Client や Resource Server なので、HTML のエラーページは返さない。
+func (s *Server) writeTokenFailure(w http.ResponseWriter, r *http.Request, err error) {
+	var perr *token.Error
+	if errors.As(err, &perr) {
+		s.writeTokenError(w, r, perr)
+		return
+	}
+	s.jsonInternalError(w, r, err)
 }
 
 // writeTokenError は RFC 6749 §5.2 のエラー応答を返す。
