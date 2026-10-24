@@ -67,21 +67,27 @@ type transactionView struct {
 }
 
 type clientView struct {
-	ClientID  string `json:"client_id"`
-	Name      string `json:"name"`
-	Profile   string `json:"profile"`
+	ClientID string `json:"client_id"`
+	Name     string `json:"name"`
+	// Profile は web / native / machine / mcp。
+	Profile string `json:"profile"`
+	// ClientURI は CIMD 文書の client_uri（MCP Client のみ。ADR-0008 §6）。
+	ClientURI string `json:"client_uri,omitempty"`
 	LogoURI   string `json:"logo_uri,omitempty"`
 	PolicyURI string `json:"policy_uri,omitempty"`
 }
 
 type requestView struct {
-	Scopes    []string `json:"scopes"`
-	Prompt    []string `json:"prompt,omitempty"`
-	MaxAge    *int64   `json:"max_age,omitempty"`
-	LoginHint string   `json:"login_hint,omitempty"`
-	UILocales string   `json:"ui_locales,omitempty"`
-	ACRValues string   `json:"acr_values,omitempty"`
-	Resource  []string `json:"resource,omitempty"`
+	// RedirectURI は今回の認可要求で実際に使う redirect URI（登録情報と照合済み）。MCP 仕様（CIMD Security）が
+	// 同意画面でのホスト名表示を求めるため、全 Profile で返す（ADR-0008 §6）。
+	RedirectURI string   `json:"redirect_uri"`
+	Scopes      []string `json:"scopes"`
+	Prompt      []string `json:"prompt,omitempty"`
+	MaxAge      *int64   `json:"max_age,omitempty"`
+	LoginHint   string   `json:"login_hint,omitempty"`
+	UILocales   string   `json:"ui_locales,omitempty"`
+	ACRValues   string   `json:"acr_values,omitempty"`
+	Resource    []string `json:"resource,omitempty"`
 }
 
 // outcomeView / completeBody は Complete の本文。authenticated_at は RFC 3339。
@@ -118,7 +124,8 @@ func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusGone, "expired", "transaction has expired")
 		return
 	}
-	c, err := s.engine.Store.GetClient(ctx, txn.Request.ClientID)
+	// Store ではなく Resolver で引く。CIMD Client は Store になく、cimd.Resolver のキャッシュから返る。
+	c, err := s.engine.Clients.GetClient(ctx, txn.Request.ClientID)
 	if err != nil {
 		s.interactionInternalError(w, r, err)
 		return
@@ -129,9 +136,9 @@ func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 func newTransactionView(txn *authorization.Transaction, c *client.Client) transactionView {
 	v := transactionView{
 		ID: txn.ID, Status: string(txn.Status), CreatedAt: txn.CreatedAt, ExpiresAt: txn.ExpiresAt,
-		Client: clientView{ClientID: c.ID, Name: c.Name, Profile: string(c.Profile), LogoURI: c.LogoURI, PolicyURI: c.PolicyURI},
+		Client: clientView{ClientID: c.ID, Name: c.Name, Profile: string(c.Profile), ClientURI: c.ClientURI, LogoURI: c.LogoURI, PolicyURI: c.PolicyURI},
 		Request: requestView{
-			Scopes: txn.Request.Scopes, Prompt: txn.Request.Prompt, LoginHint: txn.Request.LoginHint,
+			RedirectURI: txn.Request.RedirectURI, Scopes: txn.Request.Scopes, Prompt: txn.Request.Prompt, LoginHint: txn.Request.LoginHint,
 			UILocales: txn.Request.UILocales, ACRValues: txn.Request.ACRValues, Resource: txn.Request.Resource,
 		},
 	}

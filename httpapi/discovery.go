@@ -29,6 +29,8 @@ type metadata struct {
 	CodeChallengeMethodsSupported             []string `json:"code_challenge_methods_supported"`
 	// RFC 9207 §3
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
+	// CIMD §6。Config.CIMD を与えたときだけ true を載せる（無効な構成では省略。ADR-0008 §5）。
+	ClientIDMetadataDocumentSupported *bool `json:"client_id_metadata_document_supported,omitempty"`
 
 	// OIDC Discovery 1.0 §3 の追加項目。openid-configuration でのみ返す。
 	SubjectTypesSupported            []string `json:"subject_types_supported,omitempty"`
@@ -40,6 +42,11 @@ type metadata struct {
 }
 
 func (s *Server) baseMetadata() metadata {
+	var cimdSupported *bool
+	if s.engine.CIMD != nil {
+		t := true
+		cimdSupported = &t
+	}
 	return metadata{
 		Issuer:                                     s.engine.Issuer,
 		AuthorizationEndpoint:                      s.endpoint(PathAuthorize),
@@ -57,6 +64,7 @@ func (s *Server) baseMetadata() metadata {
 		IntrospectionEndpointAuthMethodsSupported:  []string{"client_secret_basic", "client_secret_post"},
 		CodeChallengeMethodsSupported:              []string{"S256"},
 		AuthorizationResponseIssParameterSupported: true,
+		ClientIDMetadataDocumentSupported:          cimdSupported,
 	}
 }
 
