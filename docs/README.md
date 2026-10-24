@@ -16,6 +16,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0006 トークン形式と Token Operations](adr/0006-tokens-and-token-operations.md) | Opaque AT + JWT ID Token、Mint / Reissue の却下 |
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
 | [ロードマップ](roadmap.md) | M1〜M4 と M1 のタスク順序 |
+| [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 
 ## 技術スタック案に対する判断の要約
 

@@ -1,6 +1,6 @@
 # ロードマップと M1 の実装順序
 
-- 状態: 採用（2026-10-24 合意）
+- 状態: 採用（2026-10-24 合意）。**M1 は 2026-10-24 に完了**
 - 日付: 2026-10-24
 
 準拠仕様の段階（P0〜P3）は [rfcs.md](../rfcs.md) に従う。ここでは P0 を 2 つのマイルストーンに分け、M1 のタスク順序を決める。
@@ -38,6 +38,17 @@
 | 10 | 文書 | `docs/interaction-api.md`（Interaction App 実装者向け）、各パッケージ `doc.go` に対応 RFC 節 | — |
 
 タスク 2〜3 は並行可能。4 以降は直列。
+
+## M1 の実施結果（2026-10-24）
+
+10 タスクすべてを完了した。計画との差分:
+
+- `tests/` は別モジュールにした（コアから Adapter を import できないため。ADR-0007 §3）。
+- Code 再利用の検知で失効させるのは Grant ではなく Token Family にした（ADR-0003 / ADR-0005 を修正）。
+- Refresh Token の型と `RotateRefreshToken` の契約テストは M1 で用意し、SQLite Adapter も実装済み。発行と `refresh_token` グラントの処理は M2。
+- `Outcome.remember_consent` は M1 では実装せず、Grant は常に記録する。
+- Interaction API の「既存 Grant の参照」は M1 では提供せず、M2 で `GET /grants` として追加する。
+- `Engine`（ルートの配線）はタスク 6 で実装した。
 
 ## M1 で明示的に先送りするもの
 

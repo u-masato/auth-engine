@@ -49,9 +49,9 @@ auth-engine/
 ├── adapters/
 │   ├── sqlite/            # 別モジュール: github.com/muno/auth-engine/adapters/sqlite
 │   └── postgres/          # 別モジュール（P2）
-├── examples/standalone/   # 別モジュール: エンジン + テスト用 Interaction App + サンプル Client
+├── examples/standalone/   # 別モジュール: エンジン + デモ Interaction App（loginapp）+ サンプル Client（oauthclient）
 ├── docs/
-└── tests/                 # E2E（httptest + sqlite）。別モジュールにはしない
+└── tests/                 # 別モジュール: E2E（SQLite + httptest + loginapp）。コアから Adapter を import できないため
 ```
 
 対応関係:
@@ -155,6 +155,7 @@ Adapter は別パッケージなので非公開フィールドを読み書きで
 - 単一モジュールにしてもビルド対象には含まれないが、`go.sum` と `go mod graph` に全推移依存が現れ、`govulncheck` の対象も広がる。参考実装として「コアの依存は 1 つ」を示したい。
 - 代償: タグ付けが `adapters/sqlite/v0.1.0` 形式になり、`go.work` が必要になる。P0 では `v0.x` のまま進めるため負担は小さい。
 - 「最終的に別リポジトリ」は決めない。モノレポのままでも成立する。
+- `tests/` も別モジュールにする。コアモジュールのテストから Adapter を import すると依存の向きが逆転する（Adapter → コア → Adapter の循環）ため、Adapter と examples を参照できる外側のモジュールに置く。開発中は各モジュールの `go.mod` に `replace` を書き、`go.work` で束ねる。
 
 ### 4. 拡張点（P0 で「存在だけ」確保するインターフェース）
 
