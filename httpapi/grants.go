@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -36,14 +37,13 @@ func (s *Server) handleListGrants(w http.ResponseWriter, r *http.Request) {
 		err    error
 	)
 	if clientID := r.URL.Query().Get("client_id"); clientID != "" {
-		g, ferr := s.engine.Grants.Find(r.Context(), clientID, subject)
+		var g *grant.Grant
+		g, err = s.engine.Grants.Find(r.Context(), clientID, subject)
 		switch {
-		case ferr == nil:
+		case err == nil:
 			grants = []*grant.Grant{g}
-		case ferr == grant.ErrNotFound:
-			grants = nil
-		default:
-			err = ferr
+		case errors.Is(err, grant.ErrNotFound):
+			err = nil // 0 件
 		}
 	} else {
 		grants, err = s.engine.Grants.List(r.Context(), subject)

@@ -4,17 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"net/url"
-	"strings"
 	"testing"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
 	"github.com/u-masato/auth-engine/internal/rand"
 	"github.com/u-masato/auth-engine/token"
@@ -140,29 +136,18 @@ func TestRevocationAndIntrospection(t *testing.T) {
 	flow, tok := s.runCodeFlow(t, browser(t), "web", s.webSecret, []string{"openid"})
 
 	// Resource Server（Machine Profile）が Introspection で検証する
-	rs, rsSecret, err := client.NewMachine(client.MachineParams{ID: "rs", Name: "Resource Server", Scopes: []string{"api"}}, s.clock())
+	rsID, rsSecret := s.registerMachine(t, "rs", []string{"api"})
+	rs, err := oauthclient.NewCodeFlow(flow.Metadata, rsID, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.CreateClient(ctx, rs); err != nil {
-		t.Fatal(err)
-	}
+	rs.ClientSecret = rsSecret
 	introspect := func(tok string) map[string]any {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, s.public.URL+"/introspect", strings.NewReader(url.Values{"token": {tok}}.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.SetBasicAuth("rs", string(rsSecret))
-		res, err := http.DefaultClient.Do(req)
+		m, err := rs.Introspect(ctx, tok, "")
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("introspect: %v", err)
 		}
-		defer res.Body.Close()
-		body, _ := io.ReadAll(res.Body)
-		if res.StatusCode != http.StatusOK {
-			t.Fatalf("introspect: %d %s", res.StatusCode, body)
-		}
-		var m map[string]any
-		_ = json.Unmarshal(body, &m)
 		return m
 	}
 	in := introspect(tok.AccessToken)
@@ -204,28 +189,19 @@ func TestRevocationAndIntrospection(t *testing.T) {
 func TestClientCredentialsFlow(t *testing.T) {
 	s := newSystem(t, true)
 	ctx := context.Background()
-	m2m, secret, err := client.NewMachine(client.MachineParams{ID: "batch", Name: "Batch", Scopes: []string{"api:read", "api:write"}}, s.clock())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.CreateClient(ctx, m2m); err != nil {
-		t.Fatal(err)
-	}
+	id, secret := s.registerMachine(t, "batch", []string{"api:read", "api:write"})
 	md, err := oauthclient.Discover(ctx, http.DefaultClient, s.public.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, _ := http.NewRequest(http.MethodPost, md.TokenEndpoint, strings.NewReader(url.Values{"grant_type": {"client_credentials"}, "scope": {"api:read"}}.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth("batch", string(secret))
-	res, err := http.DefaultClient.Do(req)
+	m2m, err := oauthclient.NewCodeFlow(md, id, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
-	var tok oauthclient.TokenResponse
-	if err := json.NewDecoder(res.Body).Decode(&tok); err != nil || res.StatusCode != http.StatusOK {
-		t.Fatalf("client_credentials: %d %v", res.StatusCode, err)
+	m2m.ClientSecret = secret
+	tok, err := m2m.ClientCredentials(ctx, "api:read")
+	if err != nil {
+		t.Fatalf("client_credentials: %v", err)
 	}
 	if tok.Scope != "api:read" || tok.RefreshToken != "" || tok.IDToken != "" {
 		t.Fatalf("client_credentials response: %+v", tok)
@@ -242,59 +218,27 @@ func TestPromptNoneWithLoginSession(t *testing.T) {
 	b := browser(t)
 
 	// 1 回目: 通常のログイン（自動承認）でセッションができる
-	_, first := s.runCodeFlow(t, b, "cli", "", []string{"openid"})
-	firstClaims := s.verifyIDToken(t, first.IDToken, "cli")
+	first, err := s.authorizeWith(t, b, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// 2 回目: 同じブラウザで prompt=none → セッションを再利用し、auth_time は 1 回目と同じ
 	s.advance(time.Minute)
-	flow, cb := s.startFlow(t, "cli", "", []string{"openid"})
-	res, err := b.Get(flow.AuthorizationURL() + "&prompt=none")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	code, err := flow.HandleCallback(waitCallback(t, cb))
-	if err != nil {
-		t.Fatalf("prompt=none with session: %v", err)
-	}
-	tok, err := flow.Exchange(context.Background(), code)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c := s.verifyIDToken(t, tok.IDToken, "cli"); c.AuthTime != firstClaims.AuthTime {
-		t.Fatalf("auth_time must be reused: %d != %d", c.AuthTime, firstClaims.AuthTime)
+	if at, err := s.authorizeWith(t, b, "&prompt=none"); err != nil || at != first {
+		t.Fatalf("prompt=none with session must reuse auth_time: %d (first %d), err=%v", at, first, err)
 	}
 
 	// 別ブラウザ（セッションなし）で prompt=none → login_required
-	flow, cb = s.startFlow(t, "cli", "", []string{"openid"})
-	res, err = browser(t).Get(flow.AuthorizationURL() + "&prompt=none")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	_, err = flow.HandleCallback(waitCallback(t, cb))
+	_, err = s.authorizeWith(t, browser(t), "&prompt=none")
 	var aerr *oauthclient.AuthorizationError
 	if !errors.As(err, &aerr) || aerr.Code != "login_required" {
 		t.Fatalf("prompt=none without session: %v", err)
 	}
 
 	// prompt=login は同じブラウザでも再認証し、auth_time が進む
-	flow, cb = s.startFlow(t, "cli", "", []string{"openid"})
-	res, err = b.Get(flow.AuthorizationURL() + "&prompt=login")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	code, err = flow.HandleCallback(waitCallback(t, cb))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err = flow.Exchange(context.Background(), code)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c := s.verifyIDToken(t, tok.IDToken, "cli"); c.AuthTime <= firstClaims.AuthTime {
-		t.Fatalf("prompt=login must re-authenticate: %d <= %d", c.AuthTime, firstClaims.AuthTime)
+	if at, err := s.authorizeWith(t, b, "&prompt=login"); err != nil || at <= first {
+		t.Fatalf("prompt=login must re-authenticate: %d <= %d, err=%v", at, first, err)
 	}
 }
 

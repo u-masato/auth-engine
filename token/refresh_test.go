@@ -50,11 +50,11 @@ func TestRefreshRotation(t *testing.T) {
 	if !next.ExpiresAt.Equal(now.Add(time.Hour + 14*24*time.Hour)) {
 		t.Fatalf("sliding expiry: %v", next.ExpiresAt)
 	}
-	at, _, _ := f.store.LookupAccessToken(f.ctx, rand.Hash(first.AccessToken))
+	at := f.lookupAccess(t, first.AccessToken)
 	if at.Status != token.AccessActive {
 		t.Fatal("refresh must not revoke the previous access token")
 	}
-	newAT, _, _ := f.store.LookupAccessToken(f.ctx, rand.Hash(res.AccessToken))
+	newAT := f.lookupAccess(t, res.AccessToken)
 	if newAT.FamilyID != old.FamilyID || newAT.Subject != "alice" || !newAT.ExpiresAt.Equal(now.Add(2*time.Hour)) {
 		t.Fatalf("new access token: %+v", newAT)
 	}
@@ -103,7 +103,7 @@ func TestRefreshScope(t *testing.T) {
 	if res.Scope != "profile" || res.IDToken != "" {
 		t.Fatalf("narrowed: %+v", res)
 	}
-	at, _, _ := f.store.LookupAccessToken(f.ctx, rand.Hash(res.AccessToken))
+	at := f.lookupAccess(t, res.AccessToken)
 	if len(at.Scopes) != 1 || at.Scopes[0] != "profile" {
 		t.Fatalf("narrowed token scopes: %+v", at.Scopes)
 	}
@@ -232,17 +232,8 @@ func TestConcurrentRefresh(t *testing.T) {
 		t.Fatalf("exactly one refresh must succeed, got %d", ok)
 	}
 	// 敗者は再利用とみなされ Family が失効している（同時提示は正規クライアントの不具合でも、安全側に倒す）
-	fam, _ := f.store.GetTokenFamily(f.ctx, mustFamilyID(t, f, first.AccessToken))
+	fam, _ := f.store.GetTokenFamily(f.ctx, f.lookupAccess(t, first.AccessToken).FamilyID)
 	if fam.Active() {
 		t.Fatal("concurrent presentation must revoke the family")
 	}
-}
-
-func mustFamilyID(t *testing.T, f *fixture, accessToken string) string {
-	t.Helper()
-	at, _, err := f.store.LookupAccessToken(f.ctx, rand.Hash(accessToken))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return at.FamilyID
 }

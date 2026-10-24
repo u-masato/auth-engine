@@ -88,7 +88,7 @@ func TestClientCredentialsRevokedGrantRevives(t *testing.T) {
 	if !g2.Active() || at.Status != token.AccessActive {
 		t.Fatalf("revived: token=%+v grant=%+v", at, g2)
 	}
-	old, _, _ := f.store.LookupAccessToken(f.ctx, rand.Hash(res.AccessToken))
+	old := f.lookupAccess(t, res.AccessToken)
 	if old.Status != token.AccessRevoked {
 		t.Fatal("tokens from before the revocation must stay revoked")
 	}

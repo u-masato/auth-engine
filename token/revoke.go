@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/u-masato/auth-engine/internal/rand"
 	"github.com/u-masato/auth-engine/storage"
@@ -57,45 +58,62 @@ func (s *Service) revoke(ctx context.Context, plaintext, hint, owner string) (bo
 	}
 	hash := rand.Hash(plaintext)
 	now := s.Clock.Now()
-	order := []string{HintAccessToken, HintRefreshToken}
-	if hint == HintRefreshToken {
-		order = []string{HintRefreshToken, HintAccessToken}
-	}
-	for _, kind := range order {
+	for _, kind := range lookupOrder(hint) {
+		var (
+			found bool
+			err   error
+		)
 		if kind == HintAccessToken {
-			at, _, err := s.Store.LookupAccessToken(ctx, hash)
-			if errors.Is(err, storage.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return false, fmt.Errorf("token: lookup access token: %w", err)
-			}
-			if owner != "" && at.ClientID != owner {
-				return false, nil
-			}
-			if err := s.Store.RevokeAccessToken(ctx, hash, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
-				return false, fmt.Errorf("token: revoke access token: %w", err)
-			}
-			return true, nil
+			found, err = s.revokeAccess(ctx, hash, owner, now)
+		} else {
+			found, err = s.revokeRefresh(ctx, hash, owner, now)
 		}
-		rt, err := s.Store.LookupRefreshToken(ctx, hash)
 		if errors.Is(err, storage.ErrNotFound) {
 			continue
 		}
-		if err != nil {
-			return false, fmt.Errorf("token: lookup refresh token: %w", err)
-		}
+		return found, err
+	}
+	return false, nil
+}
+
+// revokeAccess は Access Token を失効させる。見つからなければ storage.ErrNotFound。
+func (s *Service) revokeAccess(ctx context.Context, hash, owner string, now time.Time) (bool, error) {
+	at, _, err := s.Store.LookupAccessToken(ctx, hash)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, err
+	}
+	if err != nil {
+		return false, fmt.Errorf("token: lookup access token: %w", err)
+	}
+	if owner != "" && at.ClientID != owner {
+		return false, nil
+	}
+	if err := s.Store.RevokeAccessToken(ctx, hash, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return false, fmt.Errorf("token: revoke access token: %w", err)
+	}
+	return true, nil
+}
+
+// revokeRefresh は Refresh Token の Family ごと失効させる（RFC 7009 §2.1）。見つからなければ storage.ErrNotFound。
+func (s *Service) revokeRefresh(ctx context.Context, hash, owner string, now time.Time) (bool, error) {
+	rt, err := s.Store.LookupRefreshToken(ctx, hash)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, err
+	}
+	if err != nil {
+		return false, fmt.Errorf("token: lookup refresh token: %w", err)
+	}
+	if owner != "" {
 		family, err := s.Store.GetTokenFamily(ctx, rt.FamilyID)
 		if err != nil {
 			return false, fmt.Errorf("token: get token family: %w", err)
 		}
-		if owner != "" && family.ClientID != owner {
+		if family.ClientID != owner {
 			return false, nil
 		}
-		if err := s.Store.RevokeTokenFamily(ctx, family.ID, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
-			return false, fmt.Errorf("token: revoke token family: %w", err)
-		}
-		return true, nil
 	}
-	return false, nil
+	if err := s.Store.RevokeTokenFamily(ctx, rt.FamilyID, now); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return false, fmt.Errorf("token: revoke token family: %w", err)
+	}
+	return true, nil
 }

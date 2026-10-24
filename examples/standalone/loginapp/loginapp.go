@@ -316,7 +316,7 @@ func (a *App) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		d := decide(r, txn, a.cfg.Now())
 		if d.Session != nil && d.Session.Subject != username {
-			d = decision{Fresh: true} // 別のユーザーとしてログインし直した
+			d = decision{} // 別のユーザーとしてログインし直した
 		}
 		a.approve(w, r, txn, username, r.PostForm["scope"], d)
 	default:

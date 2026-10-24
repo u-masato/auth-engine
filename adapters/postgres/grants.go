@@ -78,46 +78,41 @@ func (s *Store) upsertGrantOnce(ctx context.Context, candidate *grant.Grant) (*g
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		existing, err := scanGrant(tx.QueryRowContext(ctx, `SELECT `+grantColumns+` FROM grants WHERE client_id = $1 AND subject = $2 FOR UPDATE`,
 			candidate.ClientID, candidate.Subject))
-		switch {
-		case err == nil:
-			merged := grant.Merge(existing, candidate)
-			scopes, err := mustJSON(merged.Scopes)
-			if err != nil {
-				return err
-			}
-			claims, err := toJSON(merged.Claims)
-			if err != nil {
-				return err
-			}
-			_, err = tx.ExecContext(ctx, `UPDATE grants SET scopes = $1, claims = $2, status = $3, updated_at = $4, revoked_at = NULL WHERE id = $5`,
-				scopes, claims, string(merged.Status), mustNanos(merged.UpdatedAt), merged.ID)
-			if err != nil {
-				return err
-			}
-			result = merged
-			return nil
-		case errors.Is(err, storage.ErrNotFound):
-			scopes, err := mustJSON(candidate.Scopes)
-			if err != nil {
-				return err
-			}
-			claims, err := toJSON(candidate.Claims)
-			if err != nil {
-				return err
-			}
-			// id の重複は ON CONFLICT で検知し ErrAlreadyExists、(client_id, subject) の重複は
-			// unique_violation として呼び出し元でやり直す。
-			if err := insertOnce(ctx, tx, `INSERT INTO grants (`+grantColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
-				candidate.ID, candidate.ClientID, candidate.Subject, scopes, claims, string(candidate.Status),
-				mustNanos(candidate.CreatedAt), mustNanos(candidate.UpdatedAt), nanos(candidate.RevokedAt)); err != nil {
-				return err
-			}
-			cp := *candidate
-			result = &cp
-			return nil
-		default:
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return err
 		}
+		found := err == nil
+		row := candidate
+		if found {
+			row = grant.Merge(existing, candidate)
+		}
+		scopes, err := mustJSON(row.Scopes)
+		if err != nil {
+			return err
+		}
+		claims, err := toJSON(row.Claims)
+		if err != nil {
+			return err
+		}
+		if found {
+			_, err = tx.ExecContext(ctx, `UPDATE grants SET scopes = $1, claims = $2, status = $3, updated_at = $4, revoked_at = NULL WHERE id = $5`,
+				scopes, claims, string(row.Status), mustNanos(row.UpdatedAt), row.ID)
+			if err != nil {
+				return err
+			}
+			result = row
+			return nil
+		}
+		// id の重複は ON CONFLICT で検知し ErrAlreadyExists、(client_id, subject) の重複は
+		// unique_violation として呼び出し元でやり直す。
+		if err := insertOnce(ctx, tx, `INSERT INTO grants (`+grantColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (id) DO NOTHING`,
+			row.ID, row.ClientID, row.Subject, scopes, claims, string(row.Status),
+			mustNanos(row.CreatedAt), mustNanos(row.UpdatedAt), nanos(row.RevokedAt)); err != nil {
+			return err
+		}
+		cp := *row
+		result = &cp
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -140,11 +135,11 @@ func (s *Store) RevokeGrant(ctx context.Context, id string, now time.Time) error
 			return err
 		}
 		if n == 0 {
-			var exists bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM grants WHERE id = $1)`, id).Scan(&exists); err != nil {
+			ok, err := exists(ctx, tx, `SELECT EXISTS (SELECT 1 FROM grants WHERE id = $1)`, id)
+			if err != nil {
 				return err
 			}
-			if !exists {
+			if !ok {
 				return storage.ErrNotFound
 			}
 			return nil // 既に失効済み（冪等）

@@ -16,6 +16,15 @@ const (
 	HintRefreshToken = "refresh_token"
 )
 
+// lookupOrder は token_type_hint から探索順を返す。hint が外れていても両方の種別を探す
+// （RFC 7009 §2.1、RFC 7662 §2.1）。
+func lookupOrder(hint string) []string {
+	if hint == HintRefreshToken {
+		return []string{HintRefreshToken, HintAccessToken}
+	}
+	return []string{HintAccessToken, HintRefreshToken}
+}
+
 // Introspection はトークンの状態（RFC 7662 §2.2）。Active が false なら他のフィールドは空。
 type Introspection struct {
 	Active bool
@@ -44,11 +53,7 @@ func (s *Service) Inspect(ctx context.Context, plaintext, hint string) (*Introsp
 	}
 	hash := rand.Hash(plaintext)
 	now := s.Clock.Now()
-	order := []string{HintAccessToken, HintRefreshToken}
-	if hint == HintRefreshToken {
-		order = []string{HintRefreshToken, HintAccessToken}
-	}
-	for _, kind := range order {
+	for _, kind := range lookupOrder(hint) {
 		var (
 			in  *Introspection
 			err error
@@ -88,16 +93,23 @@ func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time
 	if err != nil {
 		return nil, err
 	}
+	inactive := &Introspection{Kind: HintRefreshToken}
+	if rt.Status != RefreshActive || rt.Expired(now) {
+		return inactive, nil
+	}
 	family, err := s.Store.GetTokenFamily(ctx, rt.FamilyID)
 	if err != nil {
 		return nil, fmt.Errorf("token: get token family: %w", err)
+	}
+	if !family.Active() {
+		return inactive, nil
 	}
 	g, err := s.Grants.GetGrant(ctx, family.GrantID)
 	if err != nil {
 		return nil, fmt.Errorf("token: get grant: %w", err)
 	}
-	if rt.Status != RefreshActive || rt.Expired(now) || !family.Active() || !g.Active() {
-		return &Introspection{Kind: HintRefreshToken}, nil
+	if !g.Active() {
+		return inactive, nil
 	}
 	return &Introspection{
 		Active: true, Scopes: family.Scopes, Audience: family.Audience, ClientID: family.ClientID, Subject: family.Subject,

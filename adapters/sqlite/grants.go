@@ -68,47 +68,42 @@ func (s *Store) UpsertGrant(ctx context.Context, candidate *grant.Grant) (*grant
 	err := s.write(ctx, func(tx *sql.Tx) error {
 		existing, err := scanGrant(tx.QueryRowContext(ctx, `SELECT `+grantColumns+` FROM grants WHERE client_id = ? AND subject = ?`,
 			candidate.ClientID, candidate.Subject))
-		switch {
-		case err == nil:
-			merged := grant.Merge(existing, candidate)
-			scopes, err := mustJSON(merged.Scopes)
-			if err != nil {
-				return err
-			}
-			claims, err := toJSON(merged.Claims)
-			if err != nil {
-				return err
-			}
-			_, err = tx.ExecContext(ctx, `UPDATE grants SET scopes = ?, claims = ?, status = ?, updated_at = ?, revoked_at = NULL WHERE id = ?`,
-				scopes, claims, string(merged.Status), mustNanos(merged.UpdatedAt), merged.ID)
-			if err != nil {
-				return err
-			}
-			result = merged
-			return nil
-		case errors.Is(err, storage.ErrNotFound):
-			scopes, err := mustJSON(candidate.Scopes)
-			if err != nil {
-				return err
-			}
-			claims, err := toJSON(candidate.Claims)
-			if err != nil {
-				return err
-			}
-			// (client_id, subject) の重複は直前の SELECT で見ているので、ここで衝突しうるのは id だけ。
-			err = insertOnce(ctx, tx, `INSERT INTO grants (`+grantColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT (id) DO NOTHING`,
-				candidate.ID, candidate.ClientID, candidate.Subject, scopes, claims, string(candidate.Status),
-				mustNanos(candidate.CreatedAt), mustNanos(candidate.UpdatedAt), nanos(candidate.RevokedAt))
-			if err != nil {
-				return err
-			}
-			cp := *candidate
-			result = &cp
-			return nil
-		default:
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return err
 		}
+		found := err == nil
+		row := candidate
+		if found {
+			row = grant.Merge(existing, candidate)
+		}
+		scopes, err := mustJSON(row.Scopes)
+		if err != nil {
+			return err
+		}
+		claims, err := toJSON(row.Claims)
+		if err != nil {
+			return err
+		}
+		if found {
+			_, err = tx.ExecContext(ctx, `UPDATE grants SET scopes = ?, claims = ?, status = ?, updated_at = ?, revoked_at = NULL WHERE id = ?`,
+				scopes, claims, string(row.Status), mustNanos(row.UpdatedAt), row.ID)
+			if err != nil {
+				return err
+			}
+			result = row
+			return nil
+		}
+		// (client_id, subject) の重複は直前の SELECT で見ているので、ここで衝突しうるのは id だけ。
+		err = insertOnce(ctx, tx, `INSERT INTO grants (`+grantColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO NOTHING`,
+			row.ID, row.ClientID, row.Subject, scopes, claims, string(row.Status),
+			mustNanos(row.CreatedAt), mustNanos(row.UpdatedAt), nanos(row.RevokedAt))
+		if err != nil {
+			return err
+		}
+		cp := *row
+		result = &cp
+		return nil
 	})
 	if err != nil {
 		return nil, err

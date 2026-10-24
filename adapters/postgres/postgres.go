@@ -130,6 +130,20 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// exists は query（SELECT EXISTS (...)）の結果を返す。
+// 条件付き UPDATE が 0 行だったとき、「存在しない」と「状態が違う」を区別するのに使う。
+func exists(ctx context.Context, q queryRower, query string, arg any) (bool, error) {
+	var ok bool
+	if err := q.QueryRowContext(ctx, query, arg).Scan(&ok); err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 // isUniqueViolation は PostgreSQL の unique_violation（23505）かを返す。
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
