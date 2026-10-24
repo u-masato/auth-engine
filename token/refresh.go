@@ -19,8 +19,9 @@ import (
 // Access Token を返す。rotated なトークンの再提示は漏えいの兆候とみなし、Family 全体を
 // 失効させる。Grant は失効させない（同じユーザーの他のセッションを巻き込まない、ADR-0006 §4）。
 //
-// scope パラメータで scope を縮小できるが、元の付与を超える拡大は invalid_scope。
-// 縮小は今回の Access Token にだけ効き、Family（と後継の Refresh Token）の scope は変わらない。
+// scope パラメータで scope を縮小できるが、元の付与を超える拡大は invalid_scope。resource も同様に
+// Family の Audience の範囲内で縮小できる（RFC 8707 §2.2）。縮小は今回の Access Token にだけ効き、
+// Family（と後継の Refresh Token）の scope / Audience は変わらない。
 func (s *Service) refresh(ctx context.Context, c *client.Client, req Request) (*Response, error) {
 	if req.RefreshToken == "" {
 		return nil, protocolErr(CodeInvalidRequest, "refresh_token is required")
@@ -59,12 +60,18 @@ func (s *Service) refresh(ctx context.Context, c *client.Client, req Request) (*
 		}
 		scopes = requested
 	}
+	// RFC 8707 §2.2: resource は Family の Audience の部分集合への縮小。scope と同じく
+	// 今回の Access Token にだけ効き、Family は変えない。
+	audience, perr := s.narrowAudience(req.Resource, family.Audience, scopes)
+	if perr != nil {
+		return nil, perr
+	}
 
 	next, nextPlain, err := s.newRefreshToken(family, now)
 	if err != nil {
 		return nil, err
 	}
-	access, accessPlain, err := s.newAccessToken(c, family, scopes, now)
+	access, accessPlain, err := s.newAccessToken(c, family, scopes, audience, now)
 	if err != nil {
 		return nil, err
 	}

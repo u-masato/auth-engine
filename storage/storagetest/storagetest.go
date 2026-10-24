@@ -115,6 +115,7 @@ func newGrant(id, clientID, subject string, scopes ...string) *grant.Grant {
 func newFamily(id, grantID string) *token.Family {
 	return &token.Family{
 		ID: id, GrantID: grantID, ClientID: "c1", Subject: "alice", Scopes: []string{"openid"},
+		Audience:        []string{"https://api.example.com", "https://mcp.example.com"},
 		AuthenticatedAt: base.Add(-time.Minute), AMR: []string{"pwd"}, ACR: "urn:acr:1",
 		Status: token.FamilyActive, CreatedAt: base, ExpiresAt: base.Add(30 * 24 * time.Hour),
 	}
@@ -123,7 +124,8 @@ func newFamily(id, grantID string) *token.Family {
 func newAccess(hash, familyID, grantID string) *token.AccessToken {
 	return &token.AccessToken{
 		Hash: hash, FamilyID: familyID, GrantID: grantID, ClientID: "c1", Subject: "alice",
-		Scopes: []string{"openid"}, Status: token.AccessActive, IssuedAt: base, ExpiresAt: base.Add(time.Hour),
+		Scopes: []string{"openid"}, Audience: []string{"https://api.example.com"},
+		Status: token.AccessActive, IssuedAt: base, ExpiresAt: base.Add(time.Hour),
 	}
 }
 
@@ -515,7 +517,7 @@ func testIssueTokens(t *testing.T, s authengine.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotAT.FamilyID != f.ID || gotAT.GrantID != g.ID || gotAT.Status != token.AccessActive ||
+	if gotAT.FamilyID != f.ID || gotAT.GrantID != g.ID || gotAT.Status != token.AccessActive || !slices.Equal(gotAT.Audience, at.Audience) ||
 		!gotAT.ExpiresAt.Equal(at.ExpiresAt) || gotG.ID != g.ID || !gotG.Active() {
 		t.Fatalf("lookup access: %+v grant=%+v", gotAT, gotG)
 	}
@@ -529,17 +531,26 @@ func testIssueTokens(t *testing.T, s authengine.Store) {
 	wantErr(t, err, storage.ErrNotFound, "unknown refresh")
 	gotF, err := s.GetTokenFamily(ctx, f.ID)
 	if err != nil || gotF.GrantID != g.ID || gotF.ClientID != "c1" || gotF.Subject != "alice" || !slices.Equal(gotF.Scopes, f.Scopes) ||
-		!gotF.AuthenticatedAt.Equal(f.AuthenticatedAt) || !slices.Equal(gotF.AMR, f.AMR) || gotF.ACR != f.ACR ||
+		!slices.Equal(gotF.Audience, f.Audience) || !gotF.AuthenticatedAt.Equal(f.AuthenticatedAt) || !slices.Equal(gotF.AMR, f.AMR) || gotF.ACR != f.ACR ||
 		!gotF.ExpiresAt.Equal(f.ExpiresAt) || !gotF.Active() {
 		t.Fatalf("get family: %+v, %v", gotF, err)
 	}
 	_, err = s.GetTokenFamily(ctx, "nope")
 	wantErr(t, err, storage.ErrNotFound, "unknown family")
 
-	// Refresh なしでも発行できる
+	// Refresh なし、Audience なし（resource なしの要求）でも発行でき、Audience は空のまま戻る
 	f2 := newFamily("f2", g.ID)
-	if err := s.IssueTokens(ctx, f2, newAccess("at2", f2.ID, g.ID), nil); err != nil {
+	f2.Audience = nil
+	at2 := newAccess("at2", f2.ID, g.ID)
+	at2.Audience = nil
+	if err := s.IssueTokens(ctx, f2, at2, nil); err != nil {
 		t.Fatal(err)
+	}
+	if gotF2, err := s.GetTokenFamily(ctx, f2.ID); err != nil || len(gotF2.Audience) != 0 {
+		t.Fatalf("family without audience: %+v, %v", gotF2, err)
+	}
+	if gotAT2, _, err := s.LookupAccessToken(ctx, "at2"); err != nil || len(gotAT2.Audience) != 0 {
+		t.Fatalf("access token without audience: %+v, %v", gotAT2, err)
 	}
 	// Family ID の重複
 	wantErr(t, s.IssueTokens(ctx, newFamily("f2", g.ID), newAccess("at3", "f2", g.ID), nil), storage.ErrAlreadyExists, "duplicate family")
@@ -580,7 +591,7 @@ func testRotateRefreshToken(t *testing.T, s authengine.Store) {
 		t.Fatalf("next after rotate: %+v, %v", got2, err)
 	}
 	gotAT, _, err := s.LookupAccessToken(ctx, "at-2")
-	if err != nil || gotAT.Status != token.AccessActive {
+	if err != nil || gotAT.Status != token.AccessActive || !slices.Equal(gotAT.Audience, at2.Audience) {
 		t.Fatalf("access after rotate: %+v, %v", gotAT, err)
 	}
 

@@ -18,6 +18,10 @@ type Family struct {
 	Subject  string
 	// Scopes はこの Family のトークンに付く scope。Grant の scope の部分集合。
 	Scopes []string
+	// Audience はこの Family のトークンが向けられる resource（RFC 8707）の上限。
+	// 認可要求の resource（Code の Resource）をそのまま引き継ぐ。Refresh で発行する Access Token の
+	// Audience はこの部分集合（ADR-0008 §3）。resource なしの要求では空。
+	Audience []string
 
 	// AuthenticatedAt / AMR / ACR は元の認証の情報。Refresh 時に発行する ID Token の
 	// auth_time / amr / acr は元の認証を表さなければならない（OIDC Core §12.2）ため、
@@ -62,6 +66,9 @@ type AccessToken struct {
 	ClientID string
 	Subject  string
 	Scopes   []string
+	// Audience はこのトークンが向けられる resource（RFC 8707 §2.2）。Family.Audience の部分集合。
+	// Introspection の aud に載せる。空なら認可サーバー自身（UserInfo）向け。
+	Audience []string
 
 	Status    AccessStatus
 	IssuedAt  time.Time

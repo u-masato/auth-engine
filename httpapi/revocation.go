@@ -37,15 +37,18 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // introspectionBody は RFC 7662 §2.2 の応答。active が false なら他は省く。
+// aud は RFC 7519 §4.1.3 のとおり文字列か配列のどちらでもよいが、本実装は常に配列で返す
+// （Resource Server 側の分岐を減らす）。resource なしで発行したトークンでは省く。
 type introspectionBody struct {
-	Active    bool   `json:"active"`
-	Scope     string `json:"scope,omitempty"`
-	ClientID  string `json:"client_id,omitempty"`
-	TokenType string `json:"token_type,omitempty"`
-	Exp       int64  `json:"exp,omitempty"`
-	Iat       int64  `json:"iat,omitempty"`
-	Sub       string `json:"sub,omitempty"`
-	Iss       string `json:"iss,omitempty"`
+	Active    bool     `json:"active"`
+	Scope     string   `json:"scope,omitempty"`
+	ClientID  string   `json:"client_id,omitempty"`
+	TokenType string   `json:"token_type,omitempty"`
+	Exp       int64    `json:"exp,omitempty"`
+	Iat       int64    `json:"iat,omitempty"`
+	Sub       string   `json:"sub,omitempty"`
+	Aud       []string `json:"aud,omitempty"`
+	Iss       string   `json:"iss,omitempty"`
 }
 
 // handleIntrospect は /introspect（RFC 7662）。confidential な Client の認証を要求する。
@@ -79,6 +82,7 @@ func (s *Server) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		body.Exp = in.ExpiresAt.Unix()
 		body.Iat = in.IssuedAt.Unix()
 		body.Sub = in.Subject
+		body.Aud = in.Audience
 		body.Iss = s.engine.Issuer
 	}
 	writeJSON(w, http.StatusOK, body)

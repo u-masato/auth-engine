@@ -30,7 +30,18 @@ var (
 	ErrInvalid = errors.New("resource: invalid resource indicator")
 	// ErrDuplicate は同じ resource URI が設定に 2 回現れたことを表す。
 	ErrDuplicate = errors.New("resource: duplicate resource")
+	// ErrUnknown は要求された resource が設定にないことを表す（invalid_target、RFC 8707 §2）。
+	ErrUnknown = errors.New("resource: unknown resource")
+	// ErrMixedFormats は 1 回の要求に Access Token の形式が異なる resource が混在することを表す
+	// （invalid_target、ADR-0008 §3。1 つのトークンは 1 つの形式でしか発行できない）。
+	ErrMixedFormats = errors.New("resource: requested resources use different access token formats")
 )
+
+// oidcScopes は認可サーバー自身（UserInfo、ID Token、Refresh Token）に向けた OIDC の標準 scope
+// （OIDC Core §5.4、§11）。Resource.Scopes の制限を受けず、どの resource と組み合わせてもよい。
+var oidcScopes = map[string]bool{
+	"openid": true, "profile": true, "email": true, "address": true, "phone": true, "offline_access": true,
+}
 
 // Resource は 1 つの Resource Server の静的設定。
 type Resource struct {
@@ -45,7 +56,8 @@ type Resource struct {
 	AccessTokenFormat Format
 
 	// Scopes はこの resource 向けのトークンに付けられる scope の上限。空なら制限しない。
-	// 要求の絞り込みはトークン発行側（M3 タスク 2）で行う。
+	// OIDC の標準 scope（openid、profile 等）は認可サーバー自身に向けたものなので制限を受けない
+	// （AllowsScope）。RFC 9728 の scopes_supported にも使う（M3 タスク 6）。
 	Scopes []string
 }
 
@@ -76,6 +88,12 @@ func (r *Resource) EffectiveFormat() Format {
 		return FormatOpaque
 	}
 	return r.AccessTokenFormat
+}
+
+// AllowsScope は scope をこの resource 向けのトークンに付けてよいかを返す。
+// Scopes が空なら制限なし。OIDC の標準 scope は常に許す（oidcScopes）。
+func (r *Resource) AllowsScope(scope string) bool {
+	return len(r.Scopes) == 0 || oidcScopes[scope] || slices.Contains(r.Scopes, scope)
 }
 
 // Normalize は resource indicator を検証し、比較に使う正規形を返す。
@@ -164,6 +182,68 @@ func (s *Set) URIs() []string {
 		return nil
 	}
 	return slices.Clone(s.uris)
+}
+
+// Resolve は要求の resource パラメータ値（認可要求・トークン要求の両方）を検証し、
+// 重複を除いた正規形の一覧を返す。
+//
+//   - 値なし（resource=）は RFC 6749 §3.1 のとおり省略として扱う。
+//   - 構文違反は ErrInvalid、設定にないものは ErrUnknown（どちらも invalid_target。RFC 8707 §2）。
+//   - 複数の resource は Access Token の形式が揃っていること（ErrMixedFormats、ADR-0008 §3）。
+//
+// Client ごとの許可範囲（client.Client.AllowsResource）は呼び出し側が確認する。
+func (s *Set) Resolve(raw []string) ([]string, error) {
+	var (
+		uris   []string
+		format Format
+	)
+	for _, v := range raw {
+		if v == "" {
+			continue
+		}
+		uri, err := Normalize(v)
+		if err != nil {
+			return nil, err
+		}
+		r, ok := s.Lookup(uri)
+		if !ok {
+			return nil, fmt.Errorf("%w: %s", ErrUnknown, uri)
+		}
+		if slices.Contains(uris, uri) {
+			continue
+		}
+		if len(uris) > 0 && r.EffectiveFormat() != format {
+			return nil, fmt.Errorf("%w: %s", ErrMixedFormats, uri)
+		}
+		format = r.EffectiveFormat()
+		uris = append(uris, uri)
+	}
+	return uris, nil
+}
+
+// DisallowedScopes は、uris（設定済み・正規形）を Audience とするトークンに付けられない scope を返す。
+// 空なら全て付けられる。uris が空（resource なしの要求）なら制限しない。
+//
+// scope は、いずれかの resource が AllowsScope で許せばよい。複数 resource への 1 トークンは
+// RFC 8707 §2 が許す形で、各 Resource Server は自分に関係ない scope を無視すればよいため。
+func (s *Set) DisallowedScopes(uris, scopes []string) []string {
+	if len(uris) == 0 {
+		return nil
+	}
+	var out []string
+	for _, sc := range scopes {
+		allowed := false
+		for _, uri := range uris {
+			if r, ok := s.Lookup(uri); ok && r.AllowsScope(sc) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			out = append(out, sc)
+		}
+	}
+	return out
 }
 
 // validScopeToken は RFC 6749 §3.3 の scope-token 構文（client.ValidScopeToken と同じ規則）。

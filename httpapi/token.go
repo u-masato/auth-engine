@@ -27,6 +27,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		CodeVerifier: r.PostForm.Get("code_verifier"),
 		RefreshToken: r.PostForm.Get("refresh_token"),
 		Scope:        r.PostForm.Get("scope"),
+		Resource:     r.PostForm["resource"], // RFC 8707 §2.2。複数可
 		Credentials:  creds,
 	}
 	res, err := s.engine.Token.Exchange(r.Context(), req)

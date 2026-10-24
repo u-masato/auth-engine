@@ -116,9 +116,18 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 
 	// resource（RFC 8707 §2.1）。設定済みで Client に許された Resource Server だけを受理する。
 	// Client と redirect_uri の検証は済んでいるので invalid_target はリダイレクトして返す（ADR-0008 §1）。
-	res, desc := parseResources(resources, c, values["resource"])
-	if desc != "" {
-		return fail(CodeInvalidTarget, desc)
+	res, err := resources.Resolve(values["resource"])
+	if err != nil {
+		return fail(CodeInvalidTarget, resourceErrorDescription(err))
+	}
+	for _, uri := range res {
+		if !c.AllowsResource(uri) {
+			return fail(CodeInvalidTarget, "resource not allowed for this client: "+uri)
+		}
+	}
+	// resource ごとの scope 上限（ADR-0008 §1）。OIDC の標準 scope は制限を受けない。
+	if dis := resources.DisallowedScopes(res, scopes); len(dis) > 0 {
+		return fail(CodeInvalidScope, "scope not allowed for the requested resource: "+strings.Join(dis, " "))
 	}
 
 	// OIDC のヒント群。エンジンは構文だけ確認し、意味は Interaction App に委ねる。
@@ -159,40 +168,10 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 	return req, c, nil
 }
 
-// parseResources は resource パラメータの各値を正規化し、設定（resources）と Client の許可範囲で
-// 検証して、重複を除いた正規形の一覧を返す。失敗なら invalid_target の説明文を返す。
-//
-//   - 値なし（resource=）は RFC 6749 §3.1 のとおり省略として扱う。
-//   - 構文違反・未設定・Client の許可範囲外は invalid_target（RFC 8707 §2、ADR-0008 §1〜§2）。
-//   - 複数の resource を要求するときは Access Token の形式が揃っていること（ADR-0008 §3）。
-//     1 つのトークンは 1 つの形式でしか発行できないため。
-func parseResources(resources *resource.Set, c *client.Client, raw []string) (uris []string, desc string) {
-	var format resource.Format
-	for _, v := range raw {
-		if v == "" {
-			continue
-		}
-		uri, err := resource.Normalize(v)
-		if err != nil {
-			return nil, "malformed resource: " + v
-		}
-		r, ok := resources.Lookup(uri)
-		if !ok {
-			return nil, "unknown resource: " + uri
-		}
-		if !c.AllowsResource(uri) {
-			return nil, "resource not allowed for this client: " + uri
-		}
-		if slices.Contains(uris, uri) {
-			continue
-		}
-		if len(uris) > 0 && r.EffectiveFormat() != format {
-			return nil, "requested resources use different access token formats"
-		}
-		format = r.EffectiveFormat()
-		uris = append(uris, uri)
-	}
-	return uris, ""
+// resourceErrorDescription は resource.Set.Resolve のエラーを error_description 向けの文に写す。
+// パッケージ接頭辞を落とすだけで、値（どの resource が拒否されたか）は Client に返す。
+func resourceErrorDescription(err error) string {
+	return strings.TrimPrefix(err.Error(), "resource: ")
 }
 
 // parseScopes は空白区切りの scope を分解し、重複を除いて返す。

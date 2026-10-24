@@ -27,9 +27,9 @@ func TestUserInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue := func(hash string, scopes []string) {
-		fam := &token.Family{ID: "f-" + hash, GrantID: g.ID, ClientID: "web", Subject: "alice", Scopes: scopes, Status: token.FamilyActive, CreatedAt: now}
-		at := &token.AccessToken{Hash: rand.Hash(hash), FamilyID: fam.ID, GrantID: g.ID, ClientID: "web", Subject: "alice", Scopes: scopes,
+	issue := func(hash string, scopes []string, audience ...string) {
+		fam := &token.Family{ID: "f-" + hash, GrantID: g.ID, ClientID: "web", Subject: "alice", Scopes: scopes, Audience: audience, Status: token.FamilyActive, CreatedAt: now}
+		at := &token.AccessToken{Hash: rand.Hash(hash), FamilyID: fam.ID, GrantID: g.ID, ClientID: "web", Subject: "alice", Scopes: scopes, Audience: audience,
 			Status: token.AccessActive, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
 		if err := store.IssueTokens(ctx, fam, at, nil); err != nil {
 			t.Fatal(err)
@@ -38,6 +38,7 @@ func TestUserInfo(t *testing.T) {
 	issue("at-email", []string{"openid", "email"})
 	issue("at-noopenid", []string{"profile"})
 	issue("at-all", []string{"openid", "profile", "email"})
+	issue("at-aud", []string{"openid", "email"}, "https://mcp.example.com")
 
 	// email scope だけのトークン: name と phone_number は返らない、sub は Access Token の subject
 	claims, err := svc.UserInfo(ctx, "at-email")
@@ -56,6 +57,11 @@ func TestUserInfo(t *testing.T) {
 	claims, _ = svc.UserInfo(ctx, "at-all")
 	if claims["name"] != "Alice" || claims["email"] != "a@example.com" || claims["sub"] != "alice" {
 		t.Fatalf("all: %v", claims)
+	}
+	// Audience が別の Resource Server でも、openid があれば UserInfo は受理する（UserInfo は AS 自身のリソース。ADR-0008 §3）
+	claims, err = svc.UserInfo(ctx, "at-aud")
+	if err != nil || claims["sub"] != "alice" || claims["email"] != "a@example.com" {
+		t.Fatalf("audience-bound token: %v, %v", claims, err)
 	}
 
 	if _, err := svc.UserInfo(ctx, "at-noopenid"); !errors.Is(err, oidc.ErrInsufficientScope) {
