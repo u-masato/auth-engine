@@ -18,6 +18,7 @@ import (
 
 	"github.com/u-masato/auth-engine/cimd"
 	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/internal/clock"
 	"github.com/u-masato/auth-engine/storage"
 )
 
@@ -87,26 +88,13 @@ func (d *docServer) httpClient(allowLoopback bool) *http.Client {
 type fixture struct {
 	*docServer
 	res *cimd.Resolver
-	now time.Time
-	mu  sync.Mutex
-}
-
-func (f *fixture) clock() time.Time {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.now
-}
-
-func (f *fixture) advance(d time.Duration) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.now = f.now.Add(d)
+	clk *clock.Fixed
 }
 
 func newFixture(t *testing.T, mod func(c *cimd.Config)) *fixture {
 	t.Helper()
-	f := &fixture{docServer: newDocServer(t), now: base}
-	cfg := cimd.Config{HTTPClient: f.httpClient(true), Now: f.clock, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	f := &fixture{docServer: newDocServer(t), clk: clock.NewFixed(base)}
+	cfg := cimd.Config{HTTPClient: f.httpClient(true), Now: f.clk.Now, Logger: slog.New(slog.DiscardHandler)}
 	if mod != nil {
 		mod(&cfg)
 	}
@@ -136,12 +124,12 @@ func TestResolveAndCache(t *testing.T) {
 	}
 	// 文書を差し替えても期限内は古いまま
 	f.set(func(doc map[string]any) { doc["redirect_uris"] = []string{"http://localhost:4000/callback"} })
-	f.advance(59 * time.Second)
+	f.clk.Advance(59 * time.Second)
 	if c, _ := f.res.GetClient(ctx, f.id()); c.RedirectURIs[0] != "http://localhost:3000/callback" {
 		t.Fatal("cached document must be used until it expires")
 	}
 	// 期限切れ後は再取得して新しい文書に置き換わる
-	f.advance(2 * time.Second)
+	f.clk.Advance(2 * time.Second)
 	c, err = f.res.GetClient(ctx, f.id())
 	if err != nil || c.RedirectURIs[0] != "http://localhost:4000/callback" || f.hits.Load() != 2 {
 		t.Fatalf("after expiry: %+v hits=%d err=%v", c, f.hits.Load(), err)
@@ -160,12 +148,12 @@ func TestCacheControlIsRespectedWithinBounds(t *testing.T) {
 	if _, err := f.res.GetClient(ctx, f.id()); err != nil {
 		t.Fatal(err)
 	}
-	f.advance(9 * time.Minute)
+	f.clk.Advance(9 * time.Minute)
 	_, _ = f.res.GetClient(ctx, f.id())
 	if f.hits.Load() != 1 {
 		t.Fatalf("max-age=600 must keep the entry for 10 minutes: hits=%d", f.hits.Load())
 	}
-	f.advance(2 * time.Minute)
+	f.clk.Advance(2 * time.Minute)
 	_, _ = f.res.GetClient(ctx, f.id())
 	if f.hits.Load() != 2 {
 		t.Fatalf("entry must expire after max-age: hits=%d", f.hits.Load())
@@ -175,7 +163,7 @@ func TestCacheControlIsRespectedWithinBounds(t *testing.T) {
 	f.respond(func(w http.ResponseWriter) bool { w.Header().Set("Cache-Control", "max-age=86400"); return false })
 	f.res.Invalidate(f.id())
 	_, _ = f.res.GetClient(ctx, f.id())
-	f.advance(2*time.Hour + time.Second)
+	f.clk.Advance(2*time.Hour + time.Second)
 	_, _ = f.res.GetClient(ctx, f.id())
 	if f.hits.Load() != 4 {
 		t.Fatalf("max-age must be clamped to MaxCacheTTL: hits=%d", f.hits.Load())

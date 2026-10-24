@@ -177,7 +177,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		case token.RefreshRevoked:
 			return storage.ErrFamilyRevoked
 		}
-		if !now.Before(old.ExpiresAt) {
+		if old.Expired(now) {
 			return storage.ErrNotFound
 		}
 		var familyStatus, grantStatus string
@@ -229,11 +229,11 @@ func (s *Store) GetTokenFamily(ctx context.Context, id string) (*token.Family, e
 
 func (s *Store) RevokeTokenFamily(ctx context.Context, familyID string, now time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM token_families WHERE id = $1 FOR UPDATE)`, familyID).Scan(&exists); err != nil {
+		ok, err := exists(ctx, tx, `SELECT EXISTS (SELECT 1 FROM token_families WHERE id = $1 FOR UPDATE)`, familyID)
+		if err != nil {
 			return err
 		}
-		if !exists {
+		if !ok {
 			return storage.ErrNotFound
 		}
 		return revokeFamiliesWhere(ctx, tx, `id = $3`, familyID, now)
@@ -267,11 +267,11 @@ func (s *Store) RevokeAccessToken(ctx context.Context, hash string, now time.Tim
 	if n, _ := res.RowsAffected(); n == 1 {
 		return nil
 	}
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM access_tokens WHERE hash = $1)`, hash).Scan(&exists); err != nil {
+	ok, err := exists(ctx, s.db, `SELECT EXISTS (SELECT 1 FROM access_tokens WHERE hash = $1)`, hash)
+	if err != nil {
 		return err
 	}
-	if !exists {
+	if !ok {
 		return storage.ErrNotFound
 	}
 	return nil

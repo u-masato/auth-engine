@@ -92,11 +92,11 @@ func (s *Store) TransitionTransaction(ctx context.Context, id string, from, to a
 	if n == 1 {
 		return nil
 	}
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM transactions WHERE id = $1)`, id).Scan(&exists); err != nil {
+	ok, err := exists(ctx, s.db, `SELECT EXISTS (SELECT 1 FROM transactions WHERE id = $1)`, id)
+	if err != nil {
 		return err
 	}
-	if !exists {
+	if !ok {
 		return storage.ErrNotFound
 	}
 	return storage.ErrStateConflict

@@ -67,6 +67,12 @@ func (b ByFormat) Issue(ctx context.Context, in IssueInput) (string, *AccessToke
 	return issuer.Issue(ctx, in)
 }
 
+// expiresAt は Access Token の有効期限。JWT の exp と Store の ExpiresAt（Introspection の exp）は
+// 一致しなければならないので、どの形式もここで決める。
+func (in IssueInput) expiresAt() time.Time {
+	return in.Now.Add(in.Client.EffectiveAccessTokenTTL())
+}
+
 // newAccessRecord は形式に依らない Access Token の記録を組み立てる。
 func newAccessRecord(in IssueInput, plaintext string) *AccessToken {
 	return &AccessToken{
@@ -79,6 +85,6 @@ func newAccessRecord(in IssueInput, plaintext string) *AccessToken {
 		Audience:  in.Audience,
 		Status:    AccessActive,
 		IssuedAt:  in.Now,
-		ExpiresAt: in.Now.Add(in.Client.EffectiveAccessTokenTTL()),
+		ExpiresAt: in.expiresAt(),
 	}
 }

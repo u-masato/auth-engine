@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -23,12 +22,10 @@ const jwtAccessTokenType = "at+jwt"
 
 // JWKS キャッシュの既定値。
 const (
-	DefaultJWKSTTL         = time.Hour
-	MinJWKSTTL             = time.Minute
-	MaxJWKSTTL             = 24 * time.Hour
-	DefaultJWKSMinRefresh  = time.Minute
-	defaultJWTAlgorithmsRS = keys.AlgRS256
-	defaultJWTAlgorithmsES = keys.AlgES256
+	DefaultJWKSTTL        = time.Hour
+	MinJWKSTTL            = time.Minute
+	MaxJWKSTTL            = 24 * time.Hour
+	DefaultJWKSMinRefresh = time.Minute
 )
 
 // JWTVerifier は RFC 9068 の JWT Access Token を認可サーバーの JWKS でローカル検証する。
@@ -136,7 +133,7 @@ func (v *JWTVerifier) Verify(ctx context.Context, token string) (*Principal, err
 
 func (v *JWTVerifier) algorithms() []string {
 	if len(v.Algorithms) == 0 {
-		return []string{defaultJWTAlgorithmsRS, defaultJWTAlgorithmsES}
+		return []string{keys.AlgRS256, keys.AlgES256}
 	}
 	return v.Algorithms
 }
@@ -146,13 +143,6 @@ func (v *JWTVerifier) now() time.Time {
 		return v.Now()
 	}
 	return time.Now()
-}
-
-func (v *JWTVerifier) httpClient() *http.Client {
-	if v.HTTPClient != nil {
-		return v.HTTPClient
-	}
-	return &http.Client{Timeout: 10 * time.Second}
 }
 
 // keySet はキャッシュした JWKS を返す。期限切れ、または force（未知の kid）で MinRefresh を過ぎていれば再取得する。
@@ -171,44 +161,36 @@ func (v *JWTVerifier) keySet(ctx context.Context, force bool) (*keys.Set, error)
 	default:
 		return v.set, nil
 	}
+	// 再取得に失敗したとき、手元に JWKS があればそれで続ける。手元になければ err を返す（fail-closed）。
+	// 認可サーバーの障害中に要求ごとの取得が続かないよう、次の再試行は MinRefresh の後にする。
+	// ただし呼び出し側の ctx が終わっただけ（切断・期限）なら認可サーバーの障害ではないので間引かない。
+	// 間引くと、鍵ローテーション直後の正しいトークンを MinRefresh の間「未知の kid」で拒否してしまう。
+	fail := func(err error) (*keys.Set, error) {
+		if v.set == nil {
+			return nil, err
+		}
+		if ctx.Err() == nil {
+			v.fetchedAt = now
+			if retry := now.Add(minRefresh); v.expires.Before(retry) {
+				v.expires = retry
+			}
+		}
+		return v.set, nil
+	}
 	uri, err := v.jwksURI(ctx)
 	if err != nil {
-		return v.cachedOr(err)
+		return fail(err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	body, h, err := getJSON(ctx, httpClientOr(v.HTTPClient), uri)
 	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	res, err := v.httpClient().Do(req)
-	if err != nil {
-		return v.cachedOr(fmt.Errorf("resourceserver: jwks: %w", err))
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return v.cachedOr(fmt.Errorf("resourceserver: jwks: status %d", res.StatusCode))
-	}
-	body, err := io.ReadAll(io.LimitReader(res.Body, maxMetadataBody+1))
-	if err != nil {
-		return v.cachedOr(fmt.Errorf("resourceserver: jwks: %w", err))
-	}
-	if len(body) > maxMetadataBody {
-		return v.cachedOr(errors.New("resourceserver: jwks: response too large"))
+		return fail(fmt.Errorf("resourceserver: jwks: %w", err))
 	}
 	set, err := keys.ImportJWKS(body)
 	if err != nil {
-		return v.cachedOr(fmt.Errorf("resourceserver: jwks: %w", err))
+		return fail(fmt.Errorf("resourceserver: jwks: %w", err))
 	}
-	v.set, v.fetchedAt, v.expires = set, now, now.Add(v.jwksTTL(res.Header))
+	v.set, v.fetchedAt, v.expires = set, now, now.Add(v.jwksTTL(h))
 	return v.set, nil
-}
-
-// cachedOr は再取得に失敗したとき、手元に JWKS があればそれで続け、なければ err を返す。
-func (v *JWTVerifier) cachedOr(err error) (*keys.Set, error) {
-	if v.set != nil {
-		return v.set, nil
-	}
-	return nil, err
 }
 
 func (v *JWTVerifier) jwksURI(ctx context.Context) (string, error) {
@@ -216,7 +198,7 @@ func (v *JWTVerifier) jwksURI(ctx context.Context) (string, error) {
 		return v.JWKSURI, nil
 	}
 	if v.as == nil {
-		v.as = newASClient(v.Issuer, v.httpClient())
+		v.as = newASClient(v.Issuer, httpClientOr(v.HTTPClient))
 	}
 	m, err := v.as.metadata(ctx)
 	if err != nil {

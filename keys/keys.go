@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -37,6 +38,9 @@ const (
 	AlgRS256 = "RS256"
 	AlgES256 = "ES256"
 )
+
+// supportedAlgs はサポートする署名アルゴリズムの一覧。順序は Discovery に載せる順。
+var supportedAlgs = []string{AlgRS256, AlgES256}
 
 var (
 	// ErrNoSigningKey は、指定アルゴリズムの署名鍵がない。
@@ -56,9 +60,6 @@ type Key struct {
 	private crypto.Signer
 	public  crypto.PublicKey
 }
-
-// Public は公開鍵を返す。
-func (k *Key) Public() crypto.PublicKey { return k.public }
 
 // HasPrivate は署名に使えるかを返す。
 func (k *Key) HasPrivate() bool { return k.private != nil }
@@ -189,7 +190,7 @@ func (s *Set) SigningAlgorithms() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out []string
-	for _, alg := range []string{AlgRS256, AlgES256} {
+	for _, alg := range supportedAlgs {
 		if _, ok := s.signing[alg]; ok {
 			out = append(out, alg)
 		}
@@ -233,6 +234,7 @@ func (s *Set) SignTyped(alg, typ string, claims ...any) (string, error) {
 // 鍵は kid で選び、ヘッダの alg がその鍵のアルゴリズムと一致することを要求する
 // （RFC 8725 §3.1 アルゴリズム混同対策）。有効期限などのクレームの検証は呼び出し側が行う。
 func (s *Set) Verify(token string, out ...any) (*Header, error) {
+	// 許可リストは supportedAlgs と同じ。
 	parsed, err := jwt.ParseSigned(token, []jose.SignatureAlgorithm{jose.RS256, jose.ES256})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
@@ -280,10 +282,7 @@ type privateSet struct {
 func (s *Set) ExportPrivate() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := privateSet{Signing: map[string]string{}}
-	for alg, kid := range s.signing {
-		out.Signing[alg] = kid
-	}
+	out := privateSet{Signing: maps.Clone(s.signing)}
 	for _, kid := range s.order {
 		k := s.keys[kid]
 		var key any = k.public
@@ -326,7 +325,7 @@ func ImportPrivate(data []byte) (*Set, error) {
 		if err := json.Unmarshal(raw, &meta); err != nil {
 			return nil, fmt.Errorf("keys: import: %w", err)
 		}
-		if pk.Algorithm != AlgRS256 && pk.Algorithm != AlgES256 {
+		if !slices.Contains(supportedAlgs, pk.Algorithm) {
 			return nil, fmt.Errorf("keys: import: unsupported algorithm %q", pk.Algorithm)
 		}
 		k := &Key{ID: pk.KeyID, Alg: pk.Algorithm, CreatedAt: meta.CreatedAt}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -35,7 +36,7 @@ func ImportJWKS(data []byte) (*Set, error) {
 		if alg == "" {
 			alg = inferAlg(jwk.Key)
 		}
-		if alg != AlgRS256 && alg != AlgES256 {
+		if !slices.Contains(supportedAlgs, alg) {
 			continue
 		}
 		if !jwk.IsPublic() {

@@ -54,12 +54,16 @@ func newCIMDEnv(t *testing.T) *cimdEnv {
 
 func (ce *cimdEnv) clientID() string { return ce.docs.URL + "/client.json" }
 
+// authorizeQuery は共通の authorizeQuery() を CIMD Client 向けに差し替える。
 func (ce *cimdEnv) authorizeQuery() url.Values {
-	return url.Values{
-		"response_type": {"code"}, "client_id": {ce.clientID()}, "redirect_uri": {"http://localhost:3000/callback"},
-		"scope": {"openid files:read"}, "state": {"s1"}, "code_challenge": {rfcChallenge}, "code_challenge_method": {"S256"},
-		"nonce": {"n1"}, "resource": {"https://mcp.example.com"},
-	}
+	q := authorizeQuery()
+	q.Set("client_id", ce.clientID())
+	q.Set("redirect_uri", "http://localhost:3000/callback")
+	q.Set("scope", "openid files:read")
+	q.Set("state", "s1")
+	q.Set("resource", "https://mcp.example.com")
+	q.Del("max_age")
+	return q
 }
 
 // CIMD の client_id で Authorization Code + PKCE を完走する（ADR-0008 §4、§5、§6）。

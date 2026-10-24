@@ -30,6 +30,7 @@ type flow struct {
 	ID       string
 	ClientID string
 	Profile  client.Profile
+	Public   bool // public クライアント（Client 認証をしない）か。client.Client.IsPublic の値
 	Created  time.Time
 
 	oc         *oauthclient.CodeFlow
@@ -44,9 +45,7 @@ type flow struct {
 }
 
 // Confidential は Client 認証を行う Client か（Introspection を呼べるか）。
-func (f *flow) Confidential() bool {
-	return f.Profile != client.ProfileNative && f.Profile != client.ProfileMCP
-}
+func (f *flow) Confidential() bool { return !f.Public }
 
 // CodeFlow は認可エンドポイントを経由するフローか。
 func (f *flow) CodeFlow() bool { return f.Profile != client.ProfileMachine }
@@ -97,10 +96,10 @@ func (a *App) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
-	case c.Profile == client.ProfileNative && secret != "":
-		a.renderError(w, http.StatusBadRequest, "Native Profile は public クライアントなので Client Secret を使わない（RFC 8252 §8.5）")
+	case c.IsPublic() && secret != "":
+		a.renderError(w, http.StatusBadRequest, string(c.Profile)+" Profile は public クライアントなので Client Secret を使わない（RFC 8252 §8.5）")
 		return
-	case c.Profile != client.ProfileNative && secret == "":
+	case !c.IsPublic() && secret == "":
 		a.renderError(w, http.StatusBadRequest, string(c.Profile)+" Profile は confidential クライアントなので Client Secret が必要（RFC 6749 §2.3.1）")
 		return
 	}
@@ -123,7 +122,7 @@ func (a *App) handleStart(w http.ResponseWriter, r *http.Request) {
 		a.renderError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	f := &flow{ID: id, ClientID: c.ID, Profile: c.Profile, Created: time.Now(), oc: oc}
+	f := &flow{ID: id, ClientID: c.ID, Profile: c.Profile, Public: c.IsPublic(), Created: time.Now(), oc: oc}
 
 	if c.Profile == client.ProfileMachine {
 		a.clientCredentials(ctx, f, strings.Join(scopes, " "))

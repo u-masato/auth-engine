@@ -118,12 +118,10 @@ func (s *Server) endpoint(path string) string {
 
 // resumeURL は Interaction App がブラウザを戻す先（ADR-0003 §3 (5)）。
 func (s *Server) resumeURL(txnID, resumeToken string) string {
-	u, _ := url.Parse(s.endpoint(PathResume))
 	q := url.Values{}
 	q.Set("txn", txnID)
 	q.Set("token", resumeToken)
-	u.RawQuery = q.Encode()
-	return u.String()
+	return s.endpoint(PathResume) + "?" + q.Encode()
 }
 
 // redirect は 302 で Location を返す。認可応答のリダイレクトは RFC 6749 §4.1.2 の例に従い 302 を使う。

@@ -3,6 +3,7 @@ package resourceserver_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -88,7 +89,7 @@ func newAS(t *testing.T) *as {
 	t.Cleanup(a.srv.Close)
 
 	engine, err := authengine.New(authengine.Config{
-		Issuer: a.srv.URL, Store: store, Keys: a.keys, Now: a.now, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Issuer: a.srv.URL, Store: store, Keys: a.keys, Now: a.now, Logger: slog.New(slog.DiscardHandler),
 		Resources: []resource.Resource{
 			{URI: "https://mcp.example.com", Name: "MCP", Scopes: []string{"files:read", "files:write"}},
 			{URI: "https://jwt.example.com/api", AccessTokenFormat: resource.FormatJWT},
@@ -170,7 +171,7 @@ func TestIntrospectionVerifier(t *testing.T) {
 	p, err := resourceserver.New(resourceserver.Config{
 		Resource: "https://mcp.example.com", AuthorizationServers: []string{a.srv.URL}, Scopes: []string{"files:read", "files:write"},
 		Verifier: &resourceserver.IntrospectionVerifier{Issuer: a.srv.URL, ClientID: "rs", ClientSecret: a.rsSecret},
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:   slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -240,23 +241,19 @@ func TestIntrospectionVerifierResponses(t *testing.T) {
 		"token_type not bearer": `{"active":true,"token_type":"refresh_token","aud":["https://mcp.example.com"]}`,
 	} {
 		response = resp
-		if _, err := v.Verify(ctx, "t"); !errorsIsInvalid(err) {
+		if _, err := v.Verify(ctx, "t"); !errors.Is(err, resourceserver.ErrInvalidToken) {
 			t.Errorf("%s: want ErrInvalidToken, got %v", name, err)
 		}
 	}
 	response = `not json`
-	if _, err := v.Verify(ctx, "t"); err == nil || errorsIsInvalid(err) {
+	if _, err := v.Verify(ctx, "t"); err == nil || errors.Is(err, resourceserver.ErrInvalidToken) {
 		t.Errorf("malformed response must be a non-invalid_token error: %v", err)
 	}
 	// 資格情報が違えば 401 → 一時的な障害として扱う（設定ミスを invalid_token に見せない）
 	wrong := &resourceserver.IntrospectionVerifier{Endpoint: ep.URL, ClientID: "rs", ClientSecret: "wrong"}
-	if _, err := wrong.Verify(ctx, "t"); err == nil || errorsIsInvalid(err) {
+	if _, err := wrong.Verify(ctx, "t"); err == nil || errors.Is(err, resourceserver.ErrInvalidToken) {
 		t.Errorf("auth failure: %v", err)
 	}
-}
-
-func errorsIsInvalid(err error) bool {
-	return err != nil && strings.Contains(err.Error(), resourceserver.ErrInvalidToken.Error())
 }
 
 // JWT Access Token を JWKS でローカル検証する（RFC 9068 §4）。
@@ -266,7 +263,7 @@ func TestJWTVerifier(t *testing.T) {
 	verifier := &resourceserver.JWTVerifier{Issuer: a.srv.URL, Now: func() time.Time { return time.Now().Add(time.Duration(vnow.Load()) * time.Second) }}
 	p, err := resourceserver.New(resourceserver.Config{
 		Resource: "https://jwt.example.com/api", AuthorizationServers: []string{a.srv.URL}, Verifier: verifier,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +318,7 @@ func TestJWTVerifier(t *testing.T) {
 	// alg 許可リスト（RFC 8725 §3.1）: ES256 で署名された正当なトークンも RS256 だけの Resource Server は拒否
 	strict := &resourceserver.JWTVerifier{Issuer: a.srv.URL, Algorithms: []string{keys.AlgRS256}}
 	esToken, _ := a.keys.SignTyped(keys.AlgES256, "at+jwt", claims)
-	if _, err := strict.Verify(context.Background(), esToken); !errorsIsInvalid(err) || !strings.Contains(err.Error(), "not allowed") {
+	if _, err := strict.Verify(context.Background(), esToken); !errors.Is(err, resourceserver.ErrInvalidToken) || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("alg allowlist: %v", err)
 	}
 	if _, err := strict.Verify(context.Background(), a.tokenFor("https://jwt.example.com/api", "")); err != nil {

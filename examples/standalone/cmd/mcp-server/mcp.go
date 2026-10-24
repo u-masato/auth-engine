@@ -104,10 +104,11 @@ func mcpHandler(w http.ResponseWriter, r *http.Request) {
 			res.Error = &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
 			break
 		}
-		text, _ := json.Marshal(map[string]any{"subject": pr.Subject, "client_id": pr.ClientID, "scope": pr.Scopes, "aud": pr.Audience, "exp": pr.ExpiresAt})
+		view := principalView(pr)
+		text, _ := json.Marshal(view)
 		res.Result = map[string]any{
 			"content":           []map[string]any{{"type": "text", "text": string(text)}},
-			"structuredContent": map[string]any{"subject": pr.Subject, "client_id": pr.ClientID, "scope": pr.Scopes, "aud": pr.Audience},
+			"structuredContent": view,
 		}
 	default:
 		res.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}

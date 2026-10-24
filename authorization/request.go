@@ -27,42 +27,42 @@ var multiValuedParams = map[string]bool{"resource": true}
 // 検証順序は RFC 6749 §4.1.2.1 の規則に従う。client_id と redirect_uri が確定するまでは
 // Client へリダイレクトできないので、その段階のエラーは RedirectURI を空にして返す。
 // それ以降のエラーは RedirectURI と state を持ち、Client へリダイレクトして返す。
-func parseRequest(ctx context.Context, clients client.Resolver, resources *resource.Set, values url.Values) (*Request, *client.Client, *Error) {
+func parseRequest(ctx context.Context, clients client.Resolver, resources *resource.Set, values url.Values) (*Request, *Error) {
 	// --- 1. client_id（リダイレクト不可の段階） ---
 	if len(values["client_id"]) != 1 || values.Get("client_id") == "" {
-		return nil, nil, &Error{Code: CodeInvalidRequest, Description: "client_id is required exactly once"}
+		return nil, &Error{Code: CodeInvalidRequest, Description: "client_id is required exactly once"}
 	}
 	c, err := clients.GetClient(ctx, values.Get("client_id"))
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrNotFound):
-			return nil, nil, &Error{Code: CodeInvalidRequest, Description: "unknown client_id"}
+			return nil, &Error{Code: CodeInvalidRequest, Description: "unknown client_id"}
 		case errors.Is(err, client.ErrUnresolvable):
 			// CIMD 文書の取得・検証失敗や信頼ポリシーによる拒否。理由はクライアント開発者の助けになるので返す。
-			return nil, nil, &Error{Code: CodeInvalidRequest, Description: strings.TrimPrefix(err.Error(), "client: ")}
+			return nil, &Error{Code: CodeInvalidRequest, Description: strings.TrimPrefix(err.Error(), "client: ")}
 		}
-		return nil, nil, &Error{Code: CodeServerError, Description: "client lookup failed", Cause: err}
+		return nil, &Error{Code: CodeServerError, Description: "client lookup failed", Cause: err}
 	}
 
 	// --- 2. redirect_uri（リダイレクト不可の段階） ---
 	if len(values["redirect_uri"]) > 1 {
-		return nil, nil, &Error{Code: CodeInvalidRequest, Description: "redirect_uri must not be repeated"}
+		return nil, &Error{Code: CodeInvalidRequest, Description: "redirect_uri must not be repeated"}
 	}
 	redirectURI, err := c.ResolveRedirectURI(values.Get("redirect_uri"))
 	if err != nil {
-		return nil, nil, &Error{Code: CodeInvalidRequest, Description: err.Error()}
+		return nil, &Error{Code: CodeInvalidRequest, Description: err.Error()}
 	}
 	// OIDC Core §3.1.2.1: OpenID Connect の認可要求では redirect_uri は必須。RFC 6749 だけの要求
 	// （openid なし）では登録 URI が 1 つなら省略できる（§3.1.2.3）。要求元が確定できないので
 	// リダイレクトせずエラーページにする。
 	if values.Get("redirect_uri") == "" && slices.Contains(strings.Fields(values.Get("scope")), "openid") {
-		return nil, nil, &Error{Code: CodeInvalidRequest, Description: "redirect_uri is required for OpenID Connect requests"}
+		return nil, &Error{Code: CodeInvalidRequest, Description: "redirect_uri is required for OpenID Connect requests"}
 	}
 
 	// --- 3. ここからは Client へリダイレクトして返せる ---
 	state := values.Get("state")
-	fail := func(code, desc string) (*Request, *client.Client, *Error) {
-		return nil, nil, &Error{Code: code, Description: desc, RedirectURI: redirectURI, State: state}
+	fail := func(code, desc string) (*Request, *Error) {
+		return nil, &Error{Code: code, Description: desc, RedirectURI: redirectURI, State: state}
 	}
 
 	for k, vs := range values {
@@ -173,7 +173,7 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 		req.MaxAge = time.Duration(sec) * time.Second
 		req.HasMaxAge = true
 	}
-	return req, c, nil
+	return req, nil
 }
 
 // resourceErrorDescription は resource.Set.Resolve のエラーを error_description 向けの文に写す。

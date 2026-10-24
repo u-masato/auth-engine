@@ -57,15 +57,14 @@ type Config struct {
 
 // Resolver は CIMD の URL 形式の client_id を解決する client.Resolver。
 type Resolver struct {
-	http        *http.Client
-	maxBody     int64
-	minTTL      time.Duration
-	maxTTL      time.Duration
-	trust       TrustPolicy
-	now         func() time.Time
-	logger      *slog.Logger
-	cache       *cache
-	allowLoopbk bool
+	http    *http.Client
+	maxBody int64
+	minTTL  time.Duration
+	maxTTL  time.Duration
+	trust   TrustPolicy
+	now     func() time.Time
+	logger  *slog.Logger
+	cache   *cache
 }
 
 var _ client.Resolver = (*Resolver)(nil)
@@ -76,13 +75,12 @@ func New(cfg Config) (*Resolver, error) {
 		return nil, errors.New("cimd: durations and sizes must not be negative")
 	}
 	r := &Resolver{
-		maxBody:     cfg.MaxBodySize,
-		minTTL:      cfg.MinCacheTTL,
-		maxTTL:      cfg.MaxCacheTTL,
-		trust:       cfg.TrustPolicy,
-		now:         cfg.Now,
-		logger:      cfg.Logger,
-		allowLoopbk: cfg.AllowLoopback,
+		maxBody: cfg.MaxBodySize,
+		minTTL:  cfg.MinCacheTTL,
+		maxTTL:  cfg.MaxCacheTTL,
+		trust:   cfg.TrustPolicy,
+		now:     cfg.Now,
+		logger:  cfg.Logger,
 	}
 	if r.maxBody == 0 {
 		r.maxBody = DefaultMaxBodySize
@@ -169,7 +167,8 @@ func (r *Resolver) fetch(ctx context.Context, id string, now time.Time) (*client
 	res, err := r.http.Do(req)
 	if err != nil {
 		switch {
-		case isForbiddenAddress(err):
+		// Dialer.Control の拒否は *url.Error と *net.OpError に包まれて返るので errors.Is で取り出す。
+		case errors.Is(err, ErrForbiddenAddress):
 			return nil, 0, fmt.Errorf("fetch refused: %w", ErrForbiddenAddress)
 		case errors.Is(err, errNoRedirect):
 			return nil, 0, errors.New("fetch failed: redirects are not followed")
@@ -205,7 +204,5 @@ func (r *Resolver) fetch(ctx context.Context, id string, now time.Time) (*client
 
 // Invalidate はキャッシュから id を除く。利用者が文書の更新を即時に反映させたいときに使う。
 func (r *Resolver) Invalidate(id string) {
-	r.cache.mu.Lock()
-	defer r.cache.mu.Unlock()
-	delete(r.cache.entries, id)
+	r.cache.delete(id)
 }

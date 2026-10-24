@@ -111,12 +111,12 @@ form.inline{display:inline}
 {{$c := .View.Client}}
 <h2>{{$c.Name}} <small><code>{{$c.ID}}</code></small></h2>
 <table>
-<tr><th>Profile</th><td>{{$c.Profile}}{{if native $c.Profile}}（public）{{else}}（confidential）{{end}}</td></tr>
+<tr><th>Profile</th><td>{{$c.Profile}}{{if $c.IsPublic}}（public）{{else}}（confidential）{{end}}</td></tr>
 <tr><th>redirect URI</th><td>{{range $c.RedirectURIs}}<code>{{.}}</code><br>{{else}}<span class="muted">なし</span>{{end}}</td></tr>
 <tr><th>scope</th><td>{{join $c.Scopes " "}}</td></tr>
 {{with $c.IDTokenAlg}}<tr><th>ID Token</th><td>{{.}}</td></tr>{{end}}
 <tr><th>開発用の緩和</th><td>{{if $c.AllowInsecureLocalhost}}http の localhost / loopback を許可{{else}}なし{{end}}</td></tr>
-{{if not (native $c.Profile)}}<tr><th>Client Secret</th><td>
+{{if not $c.IsPublic}}<tr><th>Client Secret</th><td>
   {{if .View.Secret}}<code>{{.View.Secret}}</code><br><small>Store にはハッシュだけを保存する。この値はコンソールのメモリにだけあり、再起動すると消える。</small>
   {{else}}<span class="muted">コンソールは知らない。下のフォームに入れる</span>{{end}}</td></tr>{{end}}
 </table>
@@ -127,7 +127,7 @@ form.inline{display:inline}
 <form method="post" action="/flows" class="panel">
   <input type="hidden" name="client_id" value="{{$c.ID}}">
   <div class="grid">
-    {{if not (native $c.Profile)}}<label>Client Secret<input type="password" name="secret" value="{{.View.Secret}}" autocomplete="off" required></label>{{end}}
+    {{if not $c.IsPublic}}<label>Client Secret<input type="password" name="secret" value="{{.View.Secret}}" autocomplete="off" required></label>{{end}}
     <label>scope<input type="text" name="scope" value="{{.Scope}}"></label>
     {{if ne (printf "%s" $c.Profile) "machine"}}
     <label>prompt <small>（OIDC Core §3.1.2.1）</small>

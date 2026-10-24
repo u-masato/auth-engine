@@ -44,10 +44,15 @@ type asClient struct {
 }
 
 func newASClient(issuer string, hc *http.Client) *asClient {
-	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Second}
-	}
 	return &asClient{issuer: issuer, http: hc}
+}
+
+// httpClientOr は hc が nil なら 10 秒でタイムアウトする既定のクライアントを返す。
+func httpClientOr(hc *http.Client) *http.Client {
+	if hc != nil {
+		return hc
+	}
+	return &http.Client{Timeout: 10 * time.Second}
 }
 
 // metadata はメタデータを返す。初回だけ取得し、issuer が一致することを確認する（RFC 8414 §3.3）。
@@ -61,7 +66,7 @@ func (c *asClient) metadata(ctx context.Context) (*asMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
-	body, err := getJSON(ctx, c.http, u)
+	body, _, err := getJSON(ctx, c.http, u)
 	if err != nil {
 		return nil, fmt.Errorf("resourceserver: authorization server metadata: %w", err)
 	}
@@ -76,27 +81,27 @@ func (c *asClient) metadata(ctx context.Context) (*asMetadata, error) {
 	return c.meta, nil
 }
 
-// getJSON は GET で JSON 本文を取得する。200 以外はエラー。
-func getJSON(ctx context.Context, hc *http.Client, u string) ([]byte, error) {
+// getJSON は GET で JSON 本文と応答ヘッダを取得する。200 以外はエラー。
+func getJSON(ctx context.Context, hc *http.Client, u string) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 	res, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d", u, res.StatusCode)
+		return nil, nil, fmt.Errorf("GET %s: status %d", u, res.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxMetadataBody+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(body) > maxMetadataBody {
-		return nil, errors.New("response too large")
+		return nil, nil, errors.New("response too large")
 	}
-	return body, nil
+	return body, res.Header, nil
 }

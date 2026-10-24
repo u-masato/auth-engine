@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -79,7 +78,7 @@ func newEnvWith(t *testing.T, mod func(cfg *authengine.Config)) *env {
 	}
 	cfg := authengine.Config{
 		Issuer: issuer, Store: e.store, Keys: e.keys, Now: func() time.Time { return e.now },
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger: slog.New(slog.DiscardHandler),
 		Resources: []resource.Resource{
 			{URI: "https://mcp.example.com", Name: "MCP"}, {URI: "https://api.example.com"},
 			{URI: "https://jwt.example.com", AccessTokenFormat: resource.FormatJWT, AccessTokenAlg: resource.AlgES256},

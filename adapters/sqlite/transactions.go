@@ -23,19 +23,12 @@ func (s *Store) CreateTransaction(ctx context.Context, txn *authorization.Transa
 		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM transactions WHERE id = ?`, txn.ID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists > 0 {
-			return storage.ErrAlreadyExists
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO transactions
+		return insertOnce(ctx, tx, `INSERT INTO transactions
 			(id, status, request, browser_binding_hash, outcome, rejection, resume_token_hash, created_at, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (id) DO NOTHING`,
 			txn.ID, string(txn.Status), request, txn.BrowserBindingHash, outcome, rejection, txn.ResumeTokenHash,
 			mustNanos(txn.CreatedAt), mustNanos(txn.ExpiresAt))
-		return err
 	})
 }
 
@@ -103,11 +96,11 @@ func (s *Store) TransitionTransaction(ctx context.Context, id string, from, to a
 		if n == 1 {
 			return nil
 		}
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM transactions WHERE id = ?`, id).Scan(&exists); err != nil {
+		ok, err := exists(ctx, tx, `SELECT COUNT(*) FROM transactions WHERE id = ?`, id)
+		if err != nil {
 			return err
 		}
-		if exists == 0 {
+		if !ok {
 			return storage.ErrNotFound
 		}
 		return storage.ErrStateConflict
@@ -135,19 +128,12 @@ func (s *Store) CreateAuthorizationCode(ctx context.Context, code *authorization
 		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM authorization_codes WHERE hash = ?`, code.Hash).Scan(&exists); err != nil {
-			return err
-		}
-		if exists > 0 {
-			return storage.ErrAlreadyExists
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO authorization_codes (`+codeColumns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		return insertOnce(ctx, tx, `INSERT INTO authorization_codes (`+codeColumns+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (hash) DO NOTHING`,
 			code.Hash, code.TxnID, code.ClientID, code.GrantID, code.FamilyID, code.Subject, code.RedirectURI,
 			boolInt(code.RedirectURIExplicit), scopes, res, code.CodeChallenge, code.CodeChallengeMethod, code.Nonce,
 			nanos(code.AuthenticatedAt), amr, code.ACR, claims, mustNanos(code.CreatedAt), mustNanos(code.ExpiresAt), nanos(code.ConsumedAt))
-		return err
 	})
 }
 

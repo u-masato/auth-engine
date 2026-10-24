@@ -32,7 +32,7 @@ var reservedClaims = map[string]bool{
 // ClaimsSupported は Discovery の claims_supported に載せる Claims 名。
 func ClaimsSupported() []string {
 	out := []string{"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "amr", "acr"}
-	for _, scope := range []string{"profile", "email", "address", "phone"} {
+	for _, scope := range StandardScopes { // openid には対応する Claims がない
 		out = append(out, scopeClaims[scope]...)
 	}
 	return out

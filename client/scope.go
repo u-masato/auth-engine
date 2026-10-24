@@ -1,6 +1,9 @@
 package client
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // validateScopes は scope の一覧が空でなく（optional なら空も可）、各要素が RFC 6749 §3.3 の
 // scope-token 構文に従い、重複がないことを検証する。
@@ -48,14 +51,7 @@ func (c *Client) DisallowedScopes(requested []string) []string {
 	}
 	var out []string
 	for _, s := range requested {
-		allowed := false
-		for _, a := range c.Scopes {
-			if a == s {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+		if !slices.Contains(c.Scopes, s) {
 			out = append(out, s)
 		}
 	}

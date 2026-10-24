@@ -193,7 +193,15 @@ func (s *Set) Lookup(raw string) (r *Resource, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	r, ok = s.byURI[uri]
+	return s.get(uri)
+}
+
+// get は正規形の uri で引く。nil の Set は空集合として扱う。
+func (s *Set) get(uri string) (*Resource, bool) {
+	if s == nil {
+		return nil, false
+	}
+	r, ok := s.byURI[uri]
 	return r, ok
 }
 
@@ -234,7 +242,7 @@ func (s *Set) Resolve(raw []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		r, ok := s.Lookup(uri)
+		r, ok := s.get(uri)
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", ErrUnknown, uri)
 		}
@@ -263,7 +271,7 @@ func (s *Set) DisallowedScopes(uris, scopes []string) []string {
 	for _, sc := range scopes {
 		allowed := false
 		for _, uri := range uris {
-			if r, ok := s.Lookup(uri); ok && r.AllowsScope(sc) {
+			if r, ok := s.get(uri); ok && r.AllowsScope(sc) {
 				allowed = true
 				break
 			}

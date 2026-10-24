@@ -278,7 +278,7 @@ func (s *Store) RotateRefreshToken(_ context.Context, oldHash string, next *toke
 	case token.RefreshRevoked:
 		return storage.ErrFamilyRevoked
 	}
-	if !now.Before(old.ExpiresAt) {
+	if old.Expired(now) {
 		return storage.ErrNotFound
 	}
 	f, ok := s.families[old.FamilyID]
@@ -396,12 +396,12 @@ func (s *Store) Purge(_ context.Context, now time.Time) error {
 		}
 	}
 	for h, t := range s.access {
-		if !now.Before(t.ExpiresAt) {
+		if t.Expired(now) {
 			delete(s.access, h)
 		}
 	}
 	for h, t := range s.refresh {
-		if !now.Before(t.ExpiresAt) {
+		if t.Expired(now) {
 			delete(s.refresh, h)
 		}
 	}

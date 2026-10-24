@@ -122,13 +122,13 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 func hello(w http.ResponseWriter, r *http.Request) {
 	pr, _ := resourceserver.FromContext(r.Context())
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"message":   "hello from the demo MCP server",
-		"path":      r.URL.Path,
-		"subject":   pr.Subject,
-		"client_id": pr.ClientID,
-		"scope":     pr.Scopes,
-		"aud":       pr.Audience,
-		"exp":       pr.ExpiresAt,
-	})
+	body := principalView(pr)
+	body["message"] = "hello from the demo MCP server"
+	body["path"] = r.URL.Path
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// principalView は応答に載せる Principal の項目。
+func principalView(pr *resourceserver.Principal) map[string]any {
+	return map[string]any{"subject": pr.Subject, "client_id": pr.ClientID, "scope": pr.Scopes, "aud": pr.Audience, "exp": pr.ExpiresAt}
 }

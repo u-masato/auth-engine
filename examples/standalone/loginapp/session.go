@@ -45,9 +45,8 @@ func writeSession(w http.ResponseWriter, s session) {
 type decision struct {
 	// Reject が空でなければ、この error コードで Reject する（prompt=none でログインが必要な場合）。
 	Reject string
-	// Fresh は新しく認証し直すか（prompt=login、max_age 超過、セッションなし）。
-	Fresh bool
-	// Session は再利用する既存セッション。Fresh なら nil。
+	// Session は再利用する既存セッション。nil なら新しく認証し直す（prompt=login、max_age 超過、
+	// セッションなし）。
 	Session *session
 }
 
@@ -63,7 +62,7 @@ func decide(r *http.Request, txn *Transaction, now time.Time) decision {
 		return decision{Reject: "login_required"}
 	}
 	if fresh {
-		return decision{Fresh: true}
+		return decision{}
 	}
 	return decision{Session: sess}
 }

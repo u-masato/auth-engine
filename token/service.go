@@ -80,10 +80,9 @@ func (s *Service) Exchange(ctx context.Context, req Request) (*Response, error) 
 		return nil, err
 	}
 	gt := client.GrantType(req.GrantType)
-	if gt == "" {
-		return nil, protocolErr(CodeInvalidRequest, "grant_type is required")
-	}
 	switch gt {
+	case "":
+		return nil, protocolErr(CodeInvalidRequest, "grant_type is required")
 	case client.GrantAuthorizationCode, client.GrantRefreshToken, client.GrantClientCredentials:
 	default:
 		return nil, protocolErr(CodeUnsupportedGrantType, "unsupported grant_type")

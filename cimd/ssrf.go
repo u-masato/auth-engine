@@ -97,9 +97,3 @@ var errNoRedirect = errors.New("cimd: redirects are not followed")
 func noRedirect(_ *http.Request, _ []*http.Request) error {
 	return errNoRedirect
 }
-
-// isForbiddenAddress は、Dialer.Control の拒否が *url.Error と *net.OpError に包まれて返るので、
-// errors.Is で ErrForbiddenAddress を取り出す補助。
-func isForbiddenAddress(err error) bool {
-	return errors.Is(err, ErrForbiddenAddress)
-}

@@ -8,6 +8,7 @@
 //     BEGIN IMMEDIATE（_txlock=immediate）で開始するので、複数プロセスからの書き込みは
 //     SQLite のロックと busy_timeout で直列化される。
 //   - 読み取りは WAL により書き込みと並行できる。
+//   - 単一行の作成は主キーへの INSERT ... ON CONFLICT DO NOTHING の更新行数で重複を判定する。
 //
 // 時刻は UTC の Unix ナノ秒で保存し、配列・マップは JSON で保存する。
 // `:memory:` は接続ごとに別 DB になるので対応しない。ファイル DB を使うこと。
@@ -29,6 +30,7 @@ import (
 	_ "modernc.org/sqlite" // database/sql ドライバー "sqlite"
 
 	authengine "github.com/u-masato/auth-engine"
+	"github.com/u-masato/auth-engine/storage"
 )
 
 //go:embed migrations/*.sql
@@ -116,6 +118,33 @@ func (s *Store) write(ctx context.Context, fn func(tx *sql.Tx) error) error {
 		return fmt.Errorf("sqlite: commit: %w", err)
 	}
 	return nil
+}
+
+// insertOnce は ON CONFLICT DO NOTHING 付きの INSERT を実行し、挿入されなければ ErrAlreadyExists。
+// conflict target は主キーに限ること。INSERT OR IGNORE は他の制約違反まで黙って捨てるので使わない。
+func insertOnce(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return storage.ErrAlreadyExists
+	}
+	return nil
+}
+
+// exists は query（SELECT COUNT(*) ...）が 1 件以上を数えるかを返す。
+// 条件付き UPDATE が 0 行だったとき、「存在しない」と「状態が違う」を区別するのに使う。
+func exists(ctx context.Context, tx *sql.Tx, query string, arg any) (bool, error) {
+	var n int
+	if err := tx.QueryRowContext(ctx, query, arg).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // --- 値の変換 ---

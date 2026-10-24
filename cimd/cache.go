@@ -61,6 +61,12 @@ func (c *cache) put(id string, cl *client.Client, expires time.Time, now time.Ti
 	c.entries[id] = cacheEntry{client: cl, expires: expires}
 }
 
+func (c *cache) delete(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, id)
+}
+
 // evictLocked は 1 件以上の空きを作る。
 func (c *cache) evictLocked(now time.Time) {
 	for id, e := range c.entries {

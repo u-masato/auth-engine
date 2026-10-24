@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 
 	"github.com/u-masato/auth-engine/authorization"
 	"github.com/u-masato/auth-engine/client"
-	"github.com/u-masato/auth-engine/storage"
+	"github.com/u-masato/auth-engine/internal/rand"
 )
 
 // InteractionAuthenticator は Interaction API の呼び出し元を認証する（ADR-0003 §4）。
@@ -33,7 +32,8 @@ func (a BearerAuthenticator) Authenticate(r *http.Request) error {
 	if a.Token == "" || len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
 		return errUnauthenticated
 	}
-	if subtle.ConstantTimeCompare([]byte(h[len(prefix):]), []byte(a.Token)) != 1 {
+	// 両辺をハッシュにしてから比べるので、長さの違いも漏れない。
+	if !rand.HashEqual(rand.Hash(a.Token), h[len(prefix):]) {
 		return errUnauthenticated
 	}
 	return nil
@@ -111,23 +111,15 @@ type resumeBody struct {
 
 func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	txn, err := s.engine.Store.GetTransaction(ctx, r.PathValue("id"))
+	txn, err := s.engine.Authorization.Transaction(ctx, r.PathValue("id"))
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			writeJSONError(w, http.StatusNotFound, "not_found", "transaction not found")
-			return
-		}
-		s.interactionInternalError(w, r, err)
-		return
-	}
-	if txn.Expired(s.engine.Clock.Now()) {
-		writeJSONError(w, http.StatusGone, "expired", "transaction has expired")
+		s.writeTransactionError(w, r, err)
 		return
 	}
 	// Store ではなく Resolver で引く。CIMD Client は Store になく、cimd.Resolver のキャッシュから返る。
 	c, err := s.engine.Clients.GetClient(ctx, txn.Request.ClientID)
 	if err != nil {
-		s.interactionInternalError(w, r, err)
+		s.jsonInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, newTransactionView(txn, c))
@@ -191,9 +183,16 @@ func (s *Server) decodeInteractionBody(w http.ResponseWriter, r *http.Request, v
 
 // writeResumeResult は Complete / Reject の結果を HTTP に写す（ADR-0003 §3 (5)）。
 func (s *Server) writeResumeResult(w http.ResponseWriter, r *http.Request, txnID, resumeToken string, err error) {
-	switch {
-	case err == nil:
+	if err == nil {
 		writeJSON(w, http.StatusOK, resumeBody{ResumeURL: s.resumeURL(txnID, resumeToken)})
+		return
+	}
+	s.writeTransactionError(w, r, err)
+}
+
+// writeTransactionError は Interaction API のエラーをステータスに写す（docs/interaction-api.md）。
+func (s *Server) writeTransactionError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
 	case errors.Is(err, authorization.ErrTransactionNotFound):
 		writeJSONError(w, http.StatusNotFound, "not_found", "transaction not found")
 	case errors.Is(err, authorization.ErrTransactionExpired):
@@ -203,11 +202,6 @@ func (s *Server) writeResumeResult(w http.ResponseWriter, r *http.Request, txnID
 	case errors.Is(err, authorization.ErrInvalidOutcome):
 		writeJSONError(w, http.StatusBadRequest, "invalid_outcome", err.Error())
 	default:
-		s.interactionInternalError(w, r, err)
+		s.jsonInternalError(w, r, err)
 	}
-}
-
-func (s *Server) interactionInternalError(w http.ResponseWriter, r *http.Request, err error) {
-	s.logger.ErrorContext(r.Context(), "interaction api internal error", "event", "http.internal_error", "path", r.URL.Path, "error", err)
-	writeJSONError(w, http.StatusInternalServerError, "server_error", "internal error")
 }

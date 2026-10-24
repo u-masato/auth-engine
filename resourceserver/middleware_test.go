@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +41,7 @@ func newProtector(t *testing.T, v resourceserver.TokenVerifier) *resourceserver.
 		Documentation:        "https://mcp.example.com/docs",
 		Verifier:             v,
 		Now:                  func() time.Time { return now },
-		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:               slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
 		t.Fatal(err)
