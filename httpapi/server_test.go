@@ -46,7 +46,10 @@ type env struct {
 	now       time.Time
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+// newEnvWith は Engine の Config を mod で調整できる newEnv。
+func newEnvWith(t *testing.T, mod func(cfg *authengine.Config)) *env {
 	t.Helper()
 	e := &env{t: t, store: memory.New(), now: now}
 	web, secret, err := client.NewWeb(client.WebParams{ID: "web", Name: "Web App", RedirectURIs: []string{redirectURI},
@@ -74,14 +77,18 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	engine, err := authengine.New(authengine.Config{
+	cfg := authengine.Config{
 		Issuer: issuer, Store: e.store, Keys: e.keys, Now: func() time.Time { return e.now },
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Resources: []resource.Resource{
 			{URI: "https://mcp.example.com", Name: "MCP"}, {URI: "https://api.example.com"},
 			{URI: "https://jwt.example.com", AccessTokenFormat: resource.FormatJWT, AccessTokenAlg: resource.AlgES256},
 		},
-	})
+	}
+	if mod != nil {
+		mod(&cfg)
+	}
+	engine, err := authengine.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,6 +656,9 @@ func TestMetadata(t *testing.T) {
 	}
 	if _, oidcOnly := m["subject_types_supported"]; oidcOnly {
 		t.Fatal("oauth-authorization-server must not carry OIDC-only fields")
+	}
+	if _, cimd := m["client_id_metadata_document_supported"]; cimd {
+		t.Fatal("client_id_metadata_document_supported must be omitted when CIMD is disabled (ADR-0008 §5)")
 	}
 	if !strings.Contains(rec.Body.String(), `"code_challenge_methods_supported":["S256"]`) {
 		t.Fatalf("pkce methods: %s", rec.Body)

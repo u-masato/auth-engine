@@ -22,6 +22,11 @@ func TestProfileTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mcp, err := NewMCP(MetadataDocument{ClientID: "https://mcp-client.example/oauth/client.json", ClientName: "MCP", RedirectURIs: []string{"http://localhost:3000/callback"}},
+		"https://mcp-client.example/oauth/client.json", now)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name         string
@@ -33,10 +38,12 @@ func TestProfileTable(t *testing.T) {
 		refresh      bool
 		idToken      bool
 		hasRedirects bool
+		resource     bool
 	}{
-		{"web", web, false, []GrantType{GrantAuthorizationCode, GrantRefreshToken}, []AuthMethod{AuthClientSecretBasic, AuthClientSecretPost}, true, true, true, true},
-		{"native", native, true, []GrantType{GrantAuthorizationCode, GrantRefreshToken}, []AuthMethod{AuthNone}, true, true, true, true},
-		{"machine", machine, false, []GrantType{GrantClientCredentials}, []AuthMethod{AuthClientSecretBasic, AuthClientSecretPost}, false, false, false, false},
+		{"web", web, false, []GrantType{GrantAuthorizationCode, GrantRefreshToken}, []AuthMethod{AuthClientSecretBasic, AuthClientSecretPost}, true, true, true, true, false},
+		{"native", native, true, []GrantType{GrantAuthorizationCode, GrantRefreshToken}, []AuthMethod{AuthNone}, true, true, true, true, false},
+		{"machine", machine, false, []GrantType{GrantClientCredentials}, []AuthMethod{AuthClientSecretBasic, AuthClientSecretPost}, false, false, false, false, false},
+		{"mcp", mcp, true, []GrantType{GrantAuthorizationCode, GrantRefreshToken}, []AuthMethod{AuthNone}, true, true, true, true, true},
 	}
 	allGrants := []GrantType{GrantAuthorizationCode, GrantRefreshToken, GrantClientCredentials}
 	allAuth := []AuthMethod{AuthClientSecretBasic, AuthClientSecretPost, AuthNone}
@@ -65,6 +72,9 @@ func TestProfileTable(t *testing.T) {
 			if tt.c.IssuesIDToken() != tt.idToken {
 				t.Errorf("IssuesIDToken = %v, want %v", tt.c.IssuesIDToken(), tt.idToken)
 			}
+			if tt.c.RequiresResource() != tt.resource {
+				t.Errorf("RequiresResource = %v, want %v", tt.c.RequiresResource(), tt.resource)
+			}
 			if (len(tt.c.RedirectURIs) > 0) != tt.hasRedirects {
 				t.Errorf("redirect URIs present = %v, want %v", len(tt.c.RedirectURIs) > 0, tt.hasRedirects)
 			}
@@ -76,7 +86,7 @@ func TestProfileTable(t *testing.T) {
 }
 
 func TestProfileValid(t *testing.T) {
-	for _, p := range []Profile{ProfileWeb, ProfileNative, ProfileMachine} {
+	for _, p := range []Profile{ProfileWeb, ProfileNative, ProfileMachine, ProfileMCP} {
 		if !p.Valid() {
 			t.Errorf("%q should be valid", p)
 		}

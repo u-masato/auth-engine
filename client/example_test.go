@@ -78,3 +78,26 @@ func ExampleNewMachine() {
 	// profile=machine public=false pkce=false authorization_code=false refresh_token=false client_credentials=true
 	// secret issued: true
 }
+
+// ExampleNewMCP は CIMD（Client ID Metadata Document）から MCP クライアントを組み立てる。
+// 通常は cimd.Resolver が文書を取得してこの関数を呼ぶので、組み込む側が直接呼ぶのは
+// 文書を事前に Store に登録しておきたいとき（CIMD §7）に限られる。
+func ExampleNewMCP() {
+	const documentURL = "https://mcp-client.example/oauth/client.json"
+	c, err := client.NewMCP(client.MetadataDocument{
+		ClientID:     documentURL, // 取得した URL と単純文字列比較で一致すること
+		ClientName:   "Example MCP Client",
+		ClientURI:    "https://mcp-client.example",
+		RedirectURIs: []string{"http://localhost:3000/callback"}, // MCP では http://localhost を許す
+		Scope:        "files:read",
+	}, documentURL, time.Now())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(describe(c))
+	fmt.Println("requires resource:", c.RequiresResource())
+
+	// Output:
+	// profile=mcp public=true pkce=true authorization_code=true refresh_token=true client_credentials=false
+	// requires resource: true
+}

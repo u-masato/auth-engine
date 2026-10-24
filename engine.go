@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/u-masato/auth-engine/authorization"
+	"github.com/u-masato/auth-engine/cimd"
+	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/grant"
 	"github.com/u-masato/auth-engine/internal/clock"
 	"github.com/u-masato/auth-engine/keys"
@@ -40,6 +42,11 @@ type Config struct {
 	// 空なら resource 付きの要求はすべて invalid_target（意図したフェイルクローズ）。
 	Resources []resource.Resource
 
+	// CIMD は Client ID Metadata Document（URL 形式の client_id）による MCP クライアントの解決を有効にする
+	// （ADR-0008 §5）。nil なら無効で、Store に登録された Client だけを解決し、Discovery に
+	// client_id_metadata_document_supported を載せない。cimd.Config の Now と Logger が nil なら Engine の値を使う。
+	CIMD *cimd.Config
+
 	// Now は現在時刻の取得関数。nil なら time.Now。テストで固定時刻を注入する。
 	Now func() time.Time
 
@@ -67,6 +74,11 @@ type Engine struct {
 	Clock  clock.Clock
 	// Resources は検証・正規化済みの Resource Server 設定。
 	Resources *resource.Set
+	// Clients は client_id の解決経路。Store だけ、または Store → CIMD の ChainResolver（Config.CIMD を与えたとき）。
+	// Interaction API など、Store ではなくこちらで Client を引くこと（CIMD Client は Store にない）。
+	Clients client.Resolver
+	// CIMD は Config.CIMD から組み立てた Resolver。無効なら nil。
+	CIMD *cimd.Resolver
 
 	Authorization *authorization.Service
 	Token         *token.Service
@@ -140,11 +152,28 @@ func New(cfg Config) (*Engine, error) {
 	}
 
 	e := &Engine{Issuer: cfg.Issuer, Store: cfg.Store, Keys: cfg.Keys, Logger: logger, Clock: clk, Resources: resources}
+	e.Clients = cfg.Store
+	if cfg.CIMD != nil {
+		ccfg := *cfg.CIMD
+		if ccfg.Now == nil {
+			ccfg.Now = clk.Now
+		}
+		if ccfg.Logger == nil {
+			ccfg.Logger = logger
+		}
+		r, err := cimd.New(ccfg)
+		if err != nil {
+			return nil, fmt.Errorf("authengine: CIMD: %w", err)
+		}
+		e.CIMD = r
+		// Store にあれば優先、なければ CIMD（ADR-0008 §5）。
+		e.Clients = client.ChainResolver{cfg.Store, r}
+	}
 	e.IDTokens = &oidc.IDTokenIssuer{Issuer: cfg.Issuer, Keys: cfg.Keys, Clock: clk, TTL: cfg.IDTokenTTL}
 	e.UserInfo = &oidc.UserInfoService{Tokens: cfg.Store, Clock: clk}
 	e.Grants = &grant.Service{Store: cfg.Store, Clock: clk}
 	e.Authorization = &authorization.Service{
-		Clients:        cfg.Store,
+		Clients:        e.Clients,
 		Store:          cfg.Store,
 		Grants:         cfg.Store,
 		Resources:      resources,
@@ -154,7 +183,7 @@ func New(cfg Config) (*Engine, error) {
 		CodeTTL:        cfg.CodeTTL,
 	}
 	e.Token = &token.Service{
-		Clients:   cfg.Store,
+		Clients:   e.Clients,
 		Store:     cfg.Store,
 		Grants:    cfg.Store,
 		Clock:     clk,

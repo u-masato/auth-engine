@@ -152,6 +152,17 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - `JWTIssuer` は `oidc` ではなく `token` パッケージ（`token/jwt.go`）に置いた。Access Token は OAuth の概念であり、`token` → `keys` の依存は `oidc` → `keys` と同じ向きで循環しない。
   - Discovery への追加項目はない（RFC 8707 / 9068 はメタデータを定義しない）。
   - 失効はローカル検証に伝播しないことをテストで明示した（Revocation 後も署名は検証できるが Introspection は `active:false`）。
+- **タスク 4（2026-10-25 完了）**: `client.ProfileMCP`（public、`authorization_code` + `refresh_token`、PKCE S256、`none`、`resource` 必須、ID Token 発行）、`client.MetadataDocument` と `client.NewMCP(doc, documentURL, now)`（CIMD §3 の `client_id` 形式、§4 の文書 URL との単純文字列一致、§4.1 の共有シークレット拒否、`grant_types` / `response_types` の矛盾検査）、`client.ParseClientIDURL`、MCP の redirect URI 規則（https 完全一致、`http://localhost` 許可、http loopback はポート無視）。認可要求で MCP Client の `resource` 欠落は `invalid_request`（リダイレクト可）。計画との差分と補足:
+  - 文書に `scope` がない MCP Client は scope の上限を持たない（`Client.Scopes` 空 = 制限なし。他 Profile では空は不正のまま）。事前登録のないクライアントの scope は resource ごとの上限（`Resource.Scopes`）で絞る。
+  - `Client.ClientURI`（CIMD の `client_uri`）を追加し、Store にも保存する（SQLite migration `00005` / PostgreSQL migration `00004`）。URL 形式の `client_id` を `Store` に事前登録する経路（CIMD §7）で値が落ちないようにするため。計画では Store の変更はなかった。
+  - `client.ChainResolver`（Store → CIMD）と `client.ErrUnresolvable`（形式は正しいが解決できない `client_id`）はタスク 4 で入れた。`authorization` は理由付きの `invalid_request`（リダイレクトしない）、`token` は `invalid_client` に写す。
+  - `http://localhost` のポートは完全一致で、ポートを無視するのは loopback IP リテラル（RFC 8252 §7.3 の対象）だけにした。
+- **タスク 5（2026-10-25 完了）**: `cimd` パッケージ（`cimd.Resolver`、`cimd.Config`、`cimd.TrustPolicy` / `AllowAll` / `HostAllowlist`、`cimd.NewTransport`）、`Config.CIMD` による `Engine` の配線（`Engine.Clients` = `ChainResolver{Store, CIMD}`、`Engine.CIMD`）、Discovery の `client_id_metadata_document_supported: true`（有効時のみ）、Interaction API の `client.profile=mcp`・`client.client_uri`・`request.redirect_uri`（全 Profile）。`docs/interaction-api.md` に契約変更と、MCP ではホスト名を表示する要請を記載。計画との差分と補足:
+  - SSRF 対策は名前解決後の接続先アドレスを `net.Dialer.Control` で検査する形にした（ADR-0008 §5 の「接続前に名前解決し」を、解決と接続の間に隙間がない形で満たす）。拒否対象は netip の判定（loopback、private、link-local、multicast、unspecified）に RFC 6890 の残りの範囲（Shared Address Space、TEST-NET、Benchmarking、6to4、Documentation、IPv4-mapped 等）を足した。プロキシは使わない（プロキシ経由だと接続先を検査できない）。
+  - `Config.HTTPClient` を差し替えてもリダイレクト非追従（`CheckRedirect`）は Resolver が上書きするが、接続先の検査は Transport の責務なので `cimd.NewTransport` を基にすることを文書で求めた。
+  - `Cache-Control` は `max-age`（`s-maxage` 優先）を [下限 1 分, 上限 24 時間] に収める。`no-store` / `no-cache` も下限でキャッシュする（取得ごとに文書サーバーへ問い合わせない判断。ADR-0008 §5 の「ヘッダーがなければ下限」と同じ扱い）。キャッシュ件数の上限（既定 1000。期限切れ → 期限の近いものの順に捨てる）を足した。未知の `client_id` を大量に送られてもメモリが際限なく増えないようにするため。
+  - `Interaction API` の `GET /transactions/{id}` は `Store` ではなく `Engine.Clients` で Client を引く（CIMD Client は Store にない）。
+  - `examples/standalone` と loginapp の対応（`-cimd-allow-loopback`、同意画面でのホスト名表示）はタスク 7。
 
 ### M3 で明示的に先送りするもの
 

@@ -44,7 +44,9 @@ type flow struct {
 }
 
 // Confidential は Client 認証を行う Client か（Introspection を呼べるか）。
-func (f *flow) Confidential() bool { return f.Profile != client.ProfileNative }
+func (f *flow) Confidential() bool {
+	return f.Profile != client.ProfileNative && f.Profile != client.ProfileMCP
+}
 
 // CodeFlow は認可エンドポイントを経由するフローか。
 func (f *flow) CodeFlow() bool { return f.Profile != client.ProfileMachine }

@@ -10,6 +10,9 @@ const (
 	ProfileNative Profile = "native"
 	// ProfileMachine はユーザーを介さないサービス間通信（confidential、client_credentials のみ）。
 	ProfileMachine Profile = "machine"
+	// ProfileMCP は MCP クライアント（public）。CIMD 文書（Client ID Metadata Document）の URL を
+	// client_id とし、事前登録なしに接続する。resource（RFC 8707）が必須（ADR-0008 §4）。
+	ProfileMCP Profile = "mcp"
 )
 
 // GrantType は RFC 6749 §4 / §6 の grant_type パラメータ値。
@@ -41,6 +44,9 @@ const (
 	redirectWeb
 	// redirectNative は https（クレーム URL）、カスタムスキーム、http loopback（port 無視）。
 	redirectNative
+	// redirectMCP は https の完全一致、http://localhost、http loopback（port 無視）。
+	// カスタムスキームは MCP 仕様「Communication Security」（localhost か HTTPS）に従い許さない。
+	redirectMCP
 )
 
 // rules は Profile ごとに固定する条件表。ADR-0004 §1 の表と 1 対 1 で対応する。
@@ -53,6 +59,11 @@ type rules struct {
 	issuesRefreshToken bool
 	issuesIDToken      bool
 	redirect           redirectPolicy
+	// requiresResource は認可要求に resource（RFC 8707）を必須とするか（ADR-0008 §4）。
+	requiresResource bool
+	// scopesOptional は Scopes が空のとき「制限なし」と解釈するか。事前登録のない CIMD Client は
+	// 文書に scope がなければ上限を持たない（resource ごとの上限 Resource.Scopes は別に効く）。
+	scopesOptional bool
 }
 
 var profileRules = map[Profile]rules{
@@ -82,6 +93,17 @@ var profileRules = map[Profile]rules{
 		issuesRefreshToken: false,
 		issuesIDToken:      false,
 		redirect:           redirectNone,
+	},
+	ProfileMCP: {
+		confidential:       false,
+		grantTypes:         []GrantType{GrantAuthorizationCode, GrantRefreshToken},
+		authMethods:        []AuthMethod{AuthNone},
+		requirePKCE:        true,
+		issuesRefreshToken: true,
+		issuesIDToken:      true,
+		redirect:           redirectMCP,
+		requiresResource:   true,
+		scopesOptional:     true,
 	},
 }
 

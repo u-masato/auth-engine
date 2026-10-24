@@ -1,6 +1,6 @@
 # Interaction API 仕様（Interaction App 実装者向け）
 
-- 対象バージョン: M2（2026-10-24）
+- 対象バージョン: M3 タスク 5（2026-10-25）。M2 からの契約変更: `client.profile` に `mcp` を追加、`client.client_uri` と `request.redirect_uri` を追加（[ADR-0008](adr/0008-mcp-integration.md) §6）
 - 設計の背景: [ADR-0003 Interaction App との契約](adr/0003-interaction-contract.md)
 - 参考実装: [examples/standalone/loginapp](../examples/standalone/loginapp/loginapp.go)
 
@@ -60,10 +60,12 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
     "client_id": "web-app",
     "name": "Example Web",
     "profile": "web",
+    "client_uri": "https://app.example.com",
     "logo_uri": "https://app.example.com/logo.png",
     "policy_uri": "https://app.example.com/policy"
   },
   "request": {
+    "redirect_uri": "https://app.example.com/callback",
     "scopes": ["openid", "profile"],
     "prompt": ["login"],
     "max_age": 300,
@@ -78,7 +80,9 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 | フィールド | 説明 |
 | --- | --- |
 | `status` | `pending` / `completed` / `rejected` / `consumed`。画面を出すのは `pending` のときだけ |
-| `client.profile` | `web` / `native` / `machine`。Native は端末上のアプリなので、同意画面の文言を変えるときに使う |
+| `client.profile` | `web` / `native` / `machine` / `mcp`。Native は端末上のアプリなので、同意画面の文言を変えるときに使う。`mcp` は事前登録のない MCP クライアント（後述） |
+| `client.client_uri` | クライアントのホームページ（RFC 7591 の `client_uri`）。CIMD 文書から解決した `mcp` の Client だけが持ち、登録済み Client では省略される |
+| `request.redirect_uri` | 今回の認可要求で実際に使う redirect URI（エンジンが登録情報と照合済み）。全 Profile で返す。`mcp` ではホスト名の表示に使う（後述） |
 | `request.scopes` | クライアントが要求した scope。ユーザーはこの部分集合を承認できる |
 | `request.prompt` | OIDC の `prompt`。`none` を含むなら UI を出してはならない。ログイン状態がなければ `login_required` で Reject する。`login` は再認証、`consent` は同意画面の再表示を求めている |
 | `request.max_age` | 秒。認証がこれより古ければ再認証させる。満たさない `authenticated_at` を送るとエンジンが `invalid_outcome` で拒否する |
@@ -86,6 +90,16 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 | `request.login_hint` 他 | 透過。エンジンは解釈しない |
 
 `completed` / `rejected` のときは `outcome` または `rejection` も返す（デバッグ用）。
+
+### `profile` が `mcp` のとき
+
+`mcp` の Client は事前登録されておらず、`client_id` は Client ID Metadata Document（CIMD）の HTTPS URL である。エンジンは文書を取得・検証済みだが、名前やロゴは文書の作者が自由に書いた値なので、運営者が審査した登録済み Client と同じ見せ方をしてはならない。MCP Authorization Specification（CIMD Security「Localhost Redirect URI Risks」）は次を求める。
+
+- **`client_id` のホスト名を表示する（MUST）。** 名前（`client.name`）だけでは別のクライアントを装えるため、「`mcp-client.example` のアプリ『Example MCP Client』が…」のように、URL のホスト名を名前と並べて出す。
+- **`request.redirect_uri` のホスト名を表示する（MUST）。** 認可後にブラウザが送られる先をユーザーに見せる。
+- **`redirect_uri` が `localhost` / loopback（`127.0.0.1`、`[::1]`）なら注意書きを出す（SHOULD）。** MCP クライアントの多くはローカルで動くため `http://localhost` を redirect URI に使い、エンジンもそれを許す。ただし別のローカルアプリが同じポートで待ち受けて Code を横取りする余地があるので、「このコンピュータ上のアプリケーションに戻ります」のような文言で、ユーザーが自分で起こした操作かを確認させる。
+
+`client.client_uri` と `client.logo_uri` は透過しているだけで、エンジンは到達性や内容を確認しない（`logo_uri` の事前取得は Interaction App の責務）。
 
 ## POST /transactions/{txn_id}/complete
 

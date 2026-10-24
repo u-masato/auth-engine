@@ -98,6 +98,27 @@ Client は Profile ごとのコンストラクタで作り、`Store.CreateClient
 - **ブラウザ上の JavaScript（SPA）から `/token` を直接呼ぶ構成には対応していない。** エンジンは CORS ヘッダーを返さない。SPA はバックエンド（BFF）を Web Profile の Client として登録し、トークンはサーバー側に置く。
 - PKCE を実装していないクライアントは接続できない。これは意図した制約である。
 
+### MCP クライアント（事前登録なし、CIMD）
+
+MCP クライアントは `Store` に登録せず、Client ID Metadata Document（CIMD）の HTTPS URL を `client_id` として接続する（[ADR-0008](adr/0008-mcp-integration.md) §4〜§5）。`Config.CIMD` を与えると有効になり、Discovery に `client_id_metadata_document_supported: true` が載る。例は [`ExampleNew_cimd`](../example_test.go)。
+
+```go
+authengine.Config{
+    // ...
+    CIMD: &cimd.Config{
+        TrustPolicy: cimd.HostAllowlist{"*.example"}, // 省略なら全ドメインを信頼
+    },
+}
+```
+
+- **`Store` が優先される。** `client_id` はまず `Store` で引き、無ければ URL 形式のものだけを CIMD として取得する。URL 形式の `client_id` を `client.NewMCP` で組み立てて `Store` に登録しておくこともできる（その文書は取得しない）。
+- **外部へ接続するのはこの経路だけ。** 文書の取得は `https` のみ、リダイレクトは追従せず、本文は 5 KB まで、タイムアウト 5 秒。接続先が RFC 6890 の特殊用途アドレス（loopback、private、link-local、クラウドのメタデータサービス等）に解決されたら接続しない。`AllowLoopback` は開発用で、本番では使わない。
+- **`HTTPClient` を差し替えるときは `cimd.NewTransport` を基にする。** 接続先の検査は Transport の責務なので、独自の Transport を渡すとその保護が外れる。
+- **文書はプロセス内にキャッシュされる。** `Cache-Control: max-age` を尊重し、既定で 1 分〜24 時間に収める。取得失敗と不正な文書はキャッシュしない。複数インスタンスでキャッシュは共有されない（各インスタンスが取得する）。
+- **MCP クライアントは `resource` が必須。** `Config.Resources` に MCP サーバーを列挙していないと、MCP クライアントの要求はすべて失敗する。
+- **信頼の判断は組み込む側に委ねる。** 既定ではどのドメインの `client_id` も受け入れる。許可リストは `cimd.HostAllowlist`、それ以上（初回利用の確認、評判サービス）は `cimd.TrustPolicy` を実装する。拒否された `client_id` の要求は `invalid_request`（認可要求）/ `invalid_client`（トークン要求）になる。
+- Interaction App は MCP クライアントの `client_id` と redirect URI のホスト名を同意画面に出す必要がある（[Interaction API 仕様](interaction-api.md)「`profile` が `mcp` のとき」）。
+
 ## 5. HTTP への公開
 
 ### 2 つの Handler を分ける
