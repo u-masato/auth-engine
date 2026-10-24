@@ -16,8 +16,9 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 | --- | --- | --- |
 | `.`（`github.com/muno/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` と、配線の入口 `Engine` | go-jose/v4 のみ |
 | `adapters/sqlite` | SQLite Store Adapter（modernc.org/sqlite、goose ライブラリ） | — |
+| `adapters/postgres` | PostgreSQL Store Adapter（pgx/v5、goose）。契約テストは Testcontainers（Docker がなければ Skip、`AUTH_ENGINE_POSTGRES_DSN` で既存 DB も可） | — |
 | `examples/standalone` | デモサーバー、デモ Interaction App（`loginapp`）、サンプルクライアント（`oauthclient`） | — |
-| `tests` | SQLite + httptest + loginapp の E2E | — |
+| `tests` | SQLite + httptest + loginapp の E2E（RP 側の ID Token 検証に go-jose） | — |
 
 コアのテストから Adapter は import できない（依存が循環する）。Adapter を使うテストは `tests/` に置く。
 
@@ -28,11 +29,13 @@ make vet test   # 全モジュールで go vet + go test -race
 make lint       # staticcheck + govulncheck + コア依存検査（scripts/check-core-deps.sh）
 go test -race ./authorization/            # 1 パッケージ
 (cd adapters/sqlite && go test -race -count=1 ./...)   # Adapter の契約テスト（ファイル DB）
+(cd adapters/postgres && go test -race -count=1 ./...) # PostgreSQL の契約テスト（Docker が必要）
 (cd examples/standalone && go run ./cmd/server -db ./auth.db)   # デモ起動（別端末で go run ./cmd/cli-client）
 ```
 
 - staticcheck はローカルの古いバイナリではなく `go run honnef.co/go/tools/cmd/staticcheck@latest ./...` を使う（Makefile がそうしている）。
 - 並行テスト（Code 同時消費など）は不安定さを疑ったら `-count=3` で回す。
+- `go mod tidy` が各 `go.mod` の `go` 指示子を上げることがある。最低バージョンは Go 1.26 なので、コミット前に `grep -n "^go " go.mod go.work adapters/*/go.mod` で確認する。
 
 ## 守るべき不変条件（変更には ADR の修正が必要）
 
