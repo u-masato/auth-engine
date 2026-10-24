@@ -1,0 +1,8 @@
+[
+    {
+        "test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+        "variant": "*",
+        "configuration-filename": "*basic-op.json",
+        "comment": "request パラメータは未対応で request_not_supported を返す（OIDC Core §6.1 で許容）。Suite はこれを検知してスキップする"
+    }
+]

@@ -12,7 +12,8 @@ M2 まで完了（2026-10-24）。API は安定していない。
 - M1: Authorization Code + PKCE、Opaque Access Token、SQLite Adapter、Interaction API
 - M2: OIDC Basic OP（ID Token、`/jwks`、`/userinfo`、OpenID Discovery）、Refresh Token Rotation、
   `client_credentials`、Revocation（RFC 7009）、Introspection（RFC 7662）、Grant 管理 API、
-  PostgreSQL Adapter。OpenID Conformance Suite はローカル実行の準備まで（[docs/conformance.md](docs/conformance.md)）
+  PostgreSQL Adapter。OpenID Conformance Suite（Basic OP）はローカルで実行済みだが、PKCE 必須の設計と
+  プランの前提が合わず大半のモジュールは評価できていない（[docs/conformance.md](docs/conformance.md)）
 - 次は M3（MCP 連携: Resource Indicators、CIMD、JWT Access Token）
 
 ## 試す

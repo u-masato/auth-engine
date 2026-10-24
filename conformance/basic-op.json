@@ -17,5 +17,74 @@
     "client_id": "conformance-web",
     "client_secret": "conformance-web-secret-0123456789abcdef0123456789"
   },
-  "consent": {}
+  "browser": [
+    {
+      "comment": "loginapp は -auto-approve で画面を出さずに承認し、Resume を経て callback へ戻る。待つだけでよい",
+      "match": "http://host.docker.internal:8080/authorize*",
+      "tasks": [
+        {
+          "task": "Verify Complete",
+          "match": "*/test/*/callback*",
+          "commands": [
+            [
+              "wait",
+              "id",
+              "submission_complete",
+              10
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "override": {
+    "oidcc-ensure-registered-redirect-uri": {
+      "browser": [
+        {
+          "comment": "redirect_uri が登録と一致しない要求はリダイレクトせず、エンジンのエラーページ（httpapi.ErrorRenderer）を表示する。Suite はその画面を撮って REVIEW にする",
+          "match": "http://host.docker.internal:8080/authorize*",
+          "tasks": [
+            {
+              "task": "Expect error page",
+              "match": "http://host.docker.internal:8080/authorize*",
+              "commands": [
+                [
+                  "wait",
+                  "xpath",
+                  "//*",
+                  10,
+                  "Authorization error",
+                  "update-image-placeholder"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "oidcc-ensure-request-object-with-redirect-uri": {
+      "browser": [
+        {
+          "comment": "redirect_uri が登録と一致しない要求はリダイレクトせず、エンジンのエラーページ（httpapi.ErrorRenderer）を表示する。Suite はその画面を撮って REVIEW にする",
+          "match": "http://host.docker.internal:8080/authorize*",
+          "tasks": [
+            {
+              "task": "Expect error page",
+              "match": "http://host.docker.internal:8080/authorize*",
+              "commands": [
+                [
+                  "wait",
+                  "xpath",
+                  "//*",
+                  10,
+                  "Authorization error",
+                  "update-image-placeholder"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
 }

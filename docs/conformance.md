@@ -2,9 +2,10 @@
 
 - 対象: OpenID Foundation Conformance Suite の `oidcc-basic-certification-test-plan`
   （variant: `server_metadata=discovery`, `client_registration=static_client`）
-- 状態: **準備済み・未実行**（2026-10-24）。Suite は公開 Docker イメージがなくソースからの
-  Maven ビルドが必要なため、M2 ではローカルで回すための構成・設定・手順まで整備し、実行と結果の
-  記録は次の作業とする。実行したらこの文書の「結果」を更新すること。
+- 状態: **実行済み（2026-10-24、Suite release-v5.3.3）**。結果は本文末尾。要点: Basic OP プランは
+  PKCE を付けない認可要求を正とするため、PKCE 必須のエンジン（ADR-0004 §5）では 35 モジュール中
+  PKCE に依存しない 5 モジュールしか評価できない。その 5 件は PASSED 2・REVIEW 2（期待どおりの
+  エラーページ）・SKIPPED 1（許容された挙動）。
 
 ## 構成
 
@@ -17,6 +18,8 @@ Docker（Conformance Suite）                      ホスト
 └──────────────────────────────────────┘        └──────────────────────────────────────┘
 ```
 
+- Suite は GitLab のコンテナレジストリに公開イメージがある（`registry.gitlab.com/openid/conformance-suite:release-v5.3.3`
+  と同 `/nginx`）。リポジトリの `docker-compose-prebuilt.yml` で起動でき、Java / Maven は不要。
 - Suite はコンテナ内から OP にアクセスするので、Issuer は `http://host.docker.internal:8080` にする。
   エンジンは既定で localhost 以外の http Issuer を拒否するため、`Config.AllowInsecureIssuer`
   （examples では `-allow-insecure-issuer`）で緩和する。**本番では使わない**。
@@ -27,12 +30,18 @@ Docker（Conformance Suite）                      ホスト
   （Web Profile、`client_secret_basic` / `client_secret_post` 両対応。シークレットは
   `client.WebParams.Secret` で指定）。redirect URI は Suite の alias `auth-engine` に対応する
   `https://localhost.emobix.co.uk:8443/test/a/auth-engine/callback` と、クエリ付きの変種。
-- Suite の設定は [conformance/basic-op.json](../conformance/basic-op.json)。
+- Suite の設定は [conformance/basic-op.json](../conformance/basic-op.json)。`browser` セクションは必須で、
+  これがないと Suite は認可 URL を開かず WAITING のまま 4 分でタイムアウトする（サーバーログ
+  `Could not find a match for url`）。loginapp は画面を出さないので、通常は callback の到着を待つだけでよい。
+  エラーページを見せるべきテスト（redirect_uri 不一致）は `override` で「Authorization error」の表示を待ち、
+  画面を撮って REVIEW にする。
+- `expected-failures.json` / `expected-skips.json` は Suite の `--expected-failures-file` /
+  `--expected-skips-file` の形式。`configuration-filename` はフルパスと照合されるので `*basic-op.json`。
 
 ## 手順
 
-前提: Docker、Java 17+、Maven、Python 3（`requests`）。`localhost.emobix.co.uk` は Suite が
-配布する証明書に合わせて 127.0.0.1 に解決されるホスト名。
+前提: Docker（compose v2）、Python 3、git。`localhost.emobix.co.uk` は Suite が配布する証明書に合わせて
+127.0.0.1 に解決される公開 DNS 名。
 
 1. auth-engine を起動する（端末 1）。DB と鍵は使い捨てでよい。
 
@@ -50,13 +59,16 @@ Docker（Conformance Suite）                      ホスト
    ./conformance/run.sh
    ```
 
-   `run.sh` は `../conformance-suite` に Suite を clone して `mvn package` し、`docker compose up -d` の後に
-   `scripts/run-test-plan.py` でプランを実行する。結果は `https://localhost.emobix.co.uk:8443/` の
-   UI でも確認できる（devmode のためログイン不要）。
+   `run.sh` は `../conformance-suite` に Suite を clone し、公開イメージで `docker compose up -d` した後、
+   venv に入れた `scripts/run-test-plan.py` でプランを実行する。結果の zip は `conformance/.work/export/` に、
+   詳細は `https://localhost.emobix.co.uk:8443/` の UI で確認できる（devmode のためログイン不要）。
+   ポート 8080〜8082 が使えないときは `OP_PORT=8090 ./conformance/run.sh` のようにし、auth-engine 側の
+   `-issuer` / `-public-addr` / `-interaction-addr` / `-login-addr` / `-login-url` も合わせる。
+   `RERUN=1:2,1:35` で一部のモジュールだけ再実行できる（番号は `--list` の出力）。
 
 3. 失敗したテストを `expected-failures.json` と突き合わせ、想定外の失敗はエンジンを修正する。
 
-## 想定される結果（実行前の見積もり）
+## 想定される結果（実行前の見積もり。実際には PKCE の非互換で大半が評価できなかった。下の「結果」を参照）
 
 | 分類 | テスト（抜粋） | 見込み | 根拠 |
 | --- | --- | --- | --- |
@@ -74,10 +86,47 @@ Docker（Conformance Suite）                      ホスト
 | 鍵ローテーション | `oidcc-server-rotate-keys` | **失敗を想定** | テスト中に手動で鍵を差し替える必要がある。examples には鍵差し替えの操作がない（`expected-failures.json`） |
 | Dynamic Registration | `oidcc-registration-*` | 対象外 | `client_registration=static_client` のプランには含まれない |
 
-## 結果
+## 結果（2026-10-24、Suite release-v5.3.3、プラン `oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]`）
 
-未実行。実行後にここへ Suite のバージョン、実行日、プランの結果一覧（PASS / WARNING / FAILURE / SKIPPED）、
-`expected-failures.json` との差分を記録する。
+### PKCE 必須との非互換
+
+Basic OP プランの 35 モジュールのうち 30 は、`code_challenge` を付けない認可要求から始まる
+（OIDC Core は PKCE を要求しないため）。エンジンは全 Profile で PKCE S256 を必須にしており
+（ADR-0004 §5「PKCE 非対応のレガシークライアントは接続できない」、RFC 9700 §2.1.1）、これらは
+認可エンドポイントで `invalid_request: code_challenge is required` を返して INTERRUPTED になる。
+これはエンジンの不具合ではなく設計上の選択で、Suite 側に Basic OP プランで PKCE を常用させる
+設定はない（PKCE を使うのは FAPI 系と eKYC の Security Profile テストのみ）。
+
+したがって Basic OP の**認定は現状の設計では取れない**。選択肢は次のとおりで、どれを採るかは ADR の議論が必要:
+
+1. 現状維持。Basic OP 認定は目標にせず、PKCE を使うプロファイル（FAPI 2.0 Security Profile など、M4 以降）で適合性を示す
+2. Conformance 実行専用の緩和（`AllowPKCEless` のような開発用フラグ）を置き、認定ではなく「PKCE 以外の実装の検証」に使う。CLAUDE.md の不変条件と ADR-0004 §5 に反するため、置くなら ADR で範囲を限定する
+3. Web Profile に限り PKCE を任意にする（RFC 9700 §2.1.1 は confidential クライアントに PKCE か `nonce` のどちらかを求めており、OIDC では `nonce` で代替できる）。ADR-0004 §1 の条件表の変更になる
+
+### 評価できた 5 モジュール
+
+| モジュール | 結果 | 内容 |
+| --- | --- | --- |
+| `oidcc-ensure-request-with-valid-pkce-succeeds` | **PASSED**（48 SUCCESS、0 WARNING） | PKCE 付きの完全なフロー: Discovery、認可、Code 交換（`client_secret_basic`）、ID Token の署名・`iss`・`aud`・`nonce`・`at_hash`・`auth_time` 検証、UserInfo の `sub` 一致 |
+| `oidcc-response-type-missing` | **PASSED** | `response_type` なしの要求に `invalid_request` をリダイレクトで返す |
+| `oidcc-ensure-registered-redirect-uri` | **REVIEW** | 未登録の `redirect_uri` ではリダイレクトせずエラーページを表示（OIDC Core §3.1.2.1）。Suite が画面を撮り、人が確認する項目 |
+| `oidcc-ensure-request-object-with-redirect-uri` | **REVIEW** | 同上（`request` オブジェクト付き、RFC 6749 §3.1.2） |
+| `oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported` | **SKIPPED**（期待どおり） | `request_not_supported` を返す。Suite はこれを許容された挙動として検知しスキップする |
+
+`oidcc-ensure-request-with-valid-pkce-succeeds` が通っていることから、ID Token・JWKS・UserInfo・クライアント認証の
+基本経路は Suite の検証条件を満たしている。残り 30 モジュールが検証している内容（prompt、max_age、scope ごとの
+Claims、Refresh、Code 再利用など）は、E2E テスト（`tests/lifecycle_test.go`）で同等の確認をしている。
+
+### 実行時に直したこと
+
+- `browser` セクションなしでは Suite が認可 URL を開かない → 設定に追加
+- エラーページを見せるテストで callback を待ってタイムアウト → `override` でエラーページの表示を待つ
+- `expected-skips.json` の `configuration-filename` がフルパスと照合されず「unexpected skip」→ `*basic-op.json`
+
+### 未確認
+
+- `oidcc-server-rotate-keys` など PKCE を付けない 30 モジュールは評価できていない（上記）
+- Refresh、Code 再利用、`prompt` / `max_age`、scope ごとの Claims は Suite では未評価（E2E のみ）
 
 ## 補足
 

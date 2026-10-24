@@ -1,6 +1,6 @@
 # ロードマップと M1 の実装順序
 
-- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（M2 の Conformance Suite は実行準備まで）
+- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（Conformance Suite は実行したが、PKCE 必須のため Basic OP の大半は評価不能。[conformance.md](conformance.md)）
 - 日付: 2026-10-24
 
 準拠仕様の段階（P0〜P3）は [準拠仕様一覧](specifications.md) に従う。ここでは P0 を 2 つのマイルストーンに分け、M1 のタスク順序を決める。
@@ -88,7 +88,7 @@
 - Grant の管理 API は `grant.Service`（`Find` / `List` / `Revoke`）として `Engine.Grants` に配線した。`grant.Store` に `ListGrantsBySubject` を追加。Interaction API の `GET /grants` は参照のみで、連携解除の HTTP API は置いていない。
 - OIDC 要求（`openid` scope）では `redirect_uri` を必須にした（OIDC Core §3.1.2.1）。OAuth 2.0 だけの要求は従来どおり登録 URI が 1 つなら省略できる。
 - PostgreSQL Adapter はプロセス内 Mutex を使わず、`SELECT ... FOR UPDATE` と CAS で原子性を担保する。契約テストは Testcontainers（`postgres:16`）で全件通過。
-- Conformance Suite は公開 Docker イメージがなく Maven ビルドが必要なため、設定・手順・想定結果（[conformance.md](conformance.md)）まで整備し、実行は次の作業とした。実行に必要なエンジン側の準備として `Config.AllowInsecureIssuer`、`client.WebParams.Secret`、loginapp の Cookie セッション（`prompt=none` / `prompt=login` / `max_age` の解釈）を追加した。
+- Conformance Suite（release-v5.3.3、公開イメージ）で Basic OP プランを実行した。35 モジュール中 30 は `code_challenge` なしの要求から始まり、PKCE 必須のエンジンでは `invalid_request` になるため評価できない。評価できた 5 件は PASSED 2（PKCE 付きの完全フロー、`response_type` 欠落）、REVIEW 2（redirect_uri 不一致のエラーページ）、SKIPPED 1（`request_not_supported`）。Basic OP 認定を目指すなら PKCE の扱いを ADR で再検討する必要がある（[conformance.md](conformance.md)「結果」）。実行のために `Config.AllowInsecureIssuer`、`client.WebParams.Secret`、loginapp の Cookie セッション（`prompt=none` / `prompt=login` / `max_age` の解釈）を追加した。
 - `go mod tidy` が各 `go.mod` の `go` 指示子を 1.26.10 に上げたことがあったため、1.26 に戻した。最低バージョンは Go 1.26 のまま。
 
 ## M2 で明示的に先送りするもの
@@ -96,5 +96,5 @@
 - JWT 形式の Access Token（RFC 9068）、`resource` の検証（M3）
 - `private_key_jwt`、PAR、DPoP、Token Exchange（M4）
 - Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
-- Conformance Suite の実行と結果の記録（[conformance.md](conformance.md) の「結果」）
+- Basic OP 認定に向けた PKCE の扱いの再検討（[conformance.md](conformance.md)「PKCE 必須との非互換」）
 - Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ
