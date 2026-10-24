@@ -56,3 +56,28 @@
 - Refresh Token の発行（M2）。Token Family の型と契約テストは M1。
 - `resource` パラメータ（M3）。未知のパラメータとして無視せず、M1 では `invalid_target` を返さずに受理だけして保存する（M3 で検証を足す）。
 - PostgreSQL（M2）。
+
+## M2 のタスク順序
+
+到達点: OIDC Basic OP として動き、Refresh Token・Revocation・Introspection・M2M を備え、PostgreSQL でも同じ契約テストを通す。
+依存関係の順に並べる。1〜3 が OIDC、4〜6 がトークンライフサイクル、7〜9 が永続化と品質保証。
+
+| # | タスク | 内容 | 完了条件 |
+| --- | --- | --- | --- |
+| 1 | `keys` | 署名鍵セット。RS256（RSA 2048）/ ES256（P-256）の生成、`kid`（RFC 7638 サムプリント）、署名鍵 1 本と検証鍵複数（ローテーション中の旧鍵）、公開 JWKS の出力、秘密鍵セットの JSON 入出力（examples が永続化に使う）。go-jose/v4 の利用はこのパッケージに閉じる（ADR-0002） | 署名→検証の往復、未知 `kid`・`alg` 不一致の拒否、JWKS に秘密鍵が含まれないこと |
+| 2 | `oidc` ID Token + Discovery | ID Token の組立（`iss` `sub` `aud` `exp` `iat` `auth_time` `nonce` `at_hash` `amr` `acr`、OIDC Core §2・§3.1.3.6）と署名。`openid` 付与時に Code 交換の応答へ `id_token` を追加。`GET /jwks`、`GET /.well-known/openid-configuration`（`jwks_uri` `userinfo_endpoint` `id_token_signing_alg_values_supported` `subject_types_supported` `claims_supported` 等）。RFC 8414 側のメタデータにも追加分を反映 | ID Token を JWKS で検証できる、`at_hash` が RFC 7636 と同様の base64url 左半分で一致、`nonce` の往復 |
+| 3 | `oidc` UserInfo | `GET|POST /userinfo`（Bearer、RFC 6750 §3 の `WWW-Authenticate` エラー）。Access Token → Grant の Claims を scope で絞って返す（OIDC Core §5.4 の `profile` `email` `address` `phone` 対応表）。`sub` は必須 | 失効・期限切れ・`openid` なしのトークンを拒否、Claims が scope で絞られる |
+| 4 | Refresh Token | Code 交換時に Profile が許せば Refresh Token を発行（絶対期限 30 日・スライド期限 14 日、Family の `ExpiresAt`）。`grant_type=refresh_token`: `RotateRefreshToken`、再利用検知で Family 失効、`scope` パラメータによる縮小（RFC 6749 §6）、`openid` なら新しい ID Token（OIDC Core §12.2）。Discovery の `grant_types_supported` 更新 | Rotation の往復、再利用で Family 失効、scope 拡大の拒否、期限切れ |
+| 5 | M2M（`client_credentials`） | Machine Profile の `grant_type=client_credentials`（RFC 6749 §4.4）。Grant は `subject = client_id` で記録し、Refresh Token も ID Token も出さない。`scope` は Client の許可範囲内 | M2M の発行・Introspection、Web / Native では `unauthorized_client` |
+| 6 | Revocation・Introspection・管理 API | `POST /revoke`（RFC 7009、`token_type_hint`、他 Client のトークンは黙って 200）、`POST /introspect`（RFC 7662、confidential Client の認証、`active` `scope` `client_id` `sub` `exp` `iat` `token_type`）。Go API: `Inspect` `RevokeToken` `RevokeGrant` `ListGrants(subject)`（ADR-0006 §5）。Store に `ListGrantsBySubject` を追加。Interaction API に `GET /grants?client_id=&subject=`（同意スキップ用、ADR-0003 §3 (4)） | 失効後の Introspection が `active:false`、Refresh Token 失効で Family 全体が無効、`GET /grants` で既存の付与 scope が取れる |
+| 7 | `adapters/postgres` | pgx/v5、goose、同じ契約テストを Testcontainers で実行。`FOR UPDATE` による Grant 行ロック、`UPDATE ... RETURNING`。Docker がなければ `t.Skip` | `storagetest` 全件通過（Docker あり環境） |
+| 8 | Conformance Suite | OpenID Foundation Conformance Suite（Basic OP プロファイル）を Docker Compose で起動し、`-auto-approve` の loginapp で自動実行する手順と設定ファイル。見つかった不適合を修正 | Basic OP の必須テストが通る。結果と未対応項目を `docs/conformance.md` に記録 |
+| 9 | E2E・文書 | E2E に ID Token の JWKS 検証、Refresh、Revocation、Introspection、UserInfo を追加。`docs/interaction-api.md` に `GET /grants`、README と ADR の状態更新 | — |
+
+タスク 1〜3 と 4〜6 は互いに独立しており並行可能。7 はいつでも着手できる。8 は 1〜6 の後。
+
+## M2 で明示的に先送りするもの
+
+- JWT 形式の Access Token（RFC 9068）、`resource` の検証（M3）
+- `private_key_jwt`、PAR、DPoP、Token Exchange（M4）
+- Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
