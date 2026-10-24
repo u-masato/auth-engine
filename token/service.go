@@ -14,6 +14,7 @@ import (
 	"github.com/muno/auth-engine/grant"
 	"github.com/muno/auth-engine/internal/clock"
 	"github.com/muno/auth-engine/internal/rand"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage"
 )
 
@@ -28,6 +29,9 @@ type Service struct {
 	Logger *slog.Logger
 	// IDTokens は openid scope が付与されたときに ID Token を発行する。nil なら発行しない。
 	IDTokens IDTokenIssuer
+	// Resources は resource パラメータ（RFC 8707 §2.2）で指定できる Resource Server の集合。
+	// authorization.Service と同じ Set を Engine が配線する。nil なら空集合。
+	Resources *resource.Set
 
 	// RefreshTokenTTL は Refresh Token の絶対期限、RefreshTokenIdleTTL はスライド期限。
 	// 0 なら既定値（DefaultRefreshTokenTTL / DefaultRefreshTokenIdleTTL）。
@@ -50,6 +54,10 @@ type Request struct {
 
 	// Scope は refresh_token / client_credentials の scope パラメータ（空白区切り、未指定なら空）。
 	Scope string
+
+	// Resource は resource パラメータ（RFC 8707 §2.2。複数可）。発行する Access Token の Audience を
+	// 認可済みの範囲内で絞る。未指定なら認可済みの全部。
+	Resource []string
 }
 
 // Response はトークン応答（RFC 6749 §5.1、RFC 6750）。
@@ -128,6 +136,12 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 	if !authorization.VerifyS256(code.CodeChallenge, req.CodeVerifier) {
 		return nil, protocolErr(CodeInvalidGrant, "code_verifier does not match")
 	}
+	// RFC 8707 §2.2: トークン要求の resource は認可要求で認可された resource の部分集合。
+	// Family には認可された全部を持ち、今回の Access Token だけを絞る（ADR-0008 §3）。
+	audience, perr := s.narrowAudience(req.Resource, code.Resource, code.Scopes)
+	if perr != nil {
+		return nil, perr
+	}
 
 	family := &Family{
 		ID:              code.FamilyID,
@@ -135,13 +149,14 @@ func (s *Service) exchangeCode(ctx context.Context, c *client.Client, req Reques
 		ClientID:        c.ID,
 		Subject:         code.Subject,
 		Scopes:          code.Scopes,
+		Audience:        code.Resource,
 		AuthenticatedAt: code.AuthenticatedAt,
 		AMR:             code.AMR,
 		ACR:             code.ACR,
 		Status:          FamilyActive,
 		CreatedAt:       now,
 	}
-	access, accessPlain, err := s.newAccessToken(c, family, code.Scopes, now)
+	access, accessPlain, err := s.newAccessToken(c, family, code.Scopes, audience, now)
 	if err != nil {
 		return nil, err
 	}
@@ -208,8 +223,8 @@ func (s *Service) revokeFamilyOnReuse(ctx context.Context, code *authorization.A
 }
 
 // newAccessToken は family に属する Opaque な Access Token を生成する。戻り値の平文は応答にのみ使う。
-// scopes は family.Scopes の部分集合（Refresh 時の縮小を反映する）。
-func (s *Service) newAccessToken(c *client.Client, family *Family, scopes []string, now time.Time) (*AccessToken, string, error) {
+// scopes は family.Scopes の、audience は family.Audience の部分集合（要求時の縮小を反映する）。
+func (s *Service) newAccessToken(c *client.Client, family *Family, scopes, audience []string, now time.Time) (*AccessToken, string, error) {
 	plaintext, err := rand.Token(AccessTokenPrefix)
 	if err != nil {
 		return nil, "", err
@@ -221,6 +236,7 @@ func (s *Service) newAccessToken(c *client.Client, family *Family, scopes []stri
 		ClientID:  c.ID,
 		Subject:   family.Subject,
 		Scopes:    scopes,
+		Audience:  audience,
 		Status:    AccessActive,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(c.EffectiveAccessTokenTTL()),
@@ -245,6 +261,41 @@ func (s *Service) newRefreshToken(family *Family, now time.Time) (*RefreshToken,
 		IssuedAt:  now,
 		ExpiresAt: expires,
 	}, plaintext, nil
+}
+
+// narrowAudience はトークン要求の resource パラメータ（RFC 8707 §2.2）を、認可済みの Audience
+// （Code の Resource、または Family の Audience）の範囲内に絞って返す。
+//
+//   - 未指定なら認可済みの全部。ただし設定から外された resource が残っていれば invalid_target
+//     （設定変更後に古い Code / Family で発行し続けないための fail-closed）。
+//   - 指定があれば、各値が設定にあり（Set.Resolve）、認可済みの範囲内であること。範囲外は invalid_target。
+//   - 絞った Audience に対して scopes が resource ごとの上限に収まること（invalid_scope、ADR-0008 §1）。
+func (s *Service) narrowAudience(requested, authorized, scopes []string) ([]string, *Error) {
+	if _, err := s.Resources.Resolve(authorized); err != nil {
+		return nil, &Error{Code: CodeInvalidTarget, Description: resourceErrorDescription(err)}
+	}
+	audience := authorized
+	if len(requested) > 0 {
+		uris, err := s.Resources.Resolve(requested)
+		if err != nil {
+			return nil, &Error{Code: CodeInvalidTarget, Description: resourceErrorDescription(err)}
+		}
+		for _, uri := range uris {
+			if !slices.Contains(authorized, uri) {
+				return nil, protocolErr(CodeInvalidTarget, "resource was not authorized: "+uri)
+			}
+		}
+		audience = uris
+	}
+	if dis := s.Resources.DisallowedScopes(audience, scopes); len(dis) > 0 {
+		return nil, protocolErr(CodeInvalidScope, "scope not allowed for the requested resource: "+strings.Join(dis, " "))
+	}
+	return audience, nil
+}
+
+// resourceErrorDescription は resource.Set.Resolve のエラーを error_description 向けの文に写す。
+func resourceErrorDescription(err error) string {
+	return strings.TrimPrefix(err.Error(), "resource: ")
 }
 
 func (s *Service) refreshTTL() time.Duration {

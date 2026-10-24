@@ -10,6 +10,10 @@ const (
 	CodeUnauthorizedClient   = "unauthorized_client"
 	CodeUnsupportedGrantType = "unsupported_grant_type"
 	CodeInvalidScope         = "invalid_scope"
+
+	// CodeInvalidTarget は resource パラメータが不正、または認可されていない Resource Server を
+	// 指している（RFC 8707 §2.2）。
+	CodeInvalidTarget = "invalid_target"
 )
 
 // Error はトークンエンドポイントのプロトコルエラー（RFC 6749 §5.2）。

@@ -23,6 +23,9 @@ type Introspection struct {
 	// 持たないので空。
 	TokenType string
 	Scopes    []string
+	// Audience はトークンが向けられる resource（RFC 7662 §2.2 の aud）。Access Token はそのトークンの、
+	// Refresh Token は Family の Audience。空なら認可サーバー自身向け。
+	Audience  []string
 	ClientID  string
 	Subject   string
 	IssuedAt  time.Time
@@ -75,7 +78,7 @@ func (s *Service) inspectAccess(ctx context.Context, hash string, now time.Time)
 		return &Introspection{Kind: HintAccessToken}, nil
 	}
 	return &Introspection{
-		Active: true, TokenType: "Bearer", Scopes: at.Scopes, ClientID: at.ClientID, Subject: at.Subject,
+		Active: true, TokenType: "Bearer", Scopes: at.Scopes, Audience: at.Audience, ClientID: at.ClientID, Subject: at.Subject,
 		IssuedAt: at.IssuedAt, ExpiresAt: at.ExpiresAt, Kind: HintAccessToken,
 	}, nil
 }
@@ -97,7 +100,7 @@ func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time
 		return &Introspection{Kind: HintRefreshToken}, nil
 	}
 	return &Introspection{
-		Active: true, Scopes: family.Scopes, ClientID: family.ClientID, Subject: family.Subject,
+		Active: true, Scopes: family.Scopes, Audience: family.Audience, ClientID: family.ClientID, Subject: family.Subject,
 		IssuedAt: rt.IssuedAt, ExpiresAt: rt.ExpiresAt, Kind: HintRefreshToken,
 	}, nil
 }

@@ -34,17 +34,17 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, codeHash string, n
 	return nil, storage.ErrNotFound // 期限切れ
 }
 
-const familyColumns = `id, grant_id, client_id, subject, scopes, authenticated_at, amr, acr, status, created_at, expires_at, revoked_at`
-const accessColumns = `hash, family_id, grant_id, client_id, subject, scopes, status, issued_at, expires_at, revoked_at`
+const familyColumns = `id, grant_id, client_id, subject, scopes, audience, authenticated_at, amr, acr, status, created_at, expires_at, revoked_at`
+const accessColumns = `hash, family_id, grant_id, client_id, subject, scopes, audience, status, issued_at, expires_at, revoked_at`
 const refreshColumns = `hash, family_id, status, replaced_by_hash, issued_at, expires_at, rotated_at, revoked_at`
 
 func scanFamily(row rowScanner) (*token.Family, error) {
 	var (
 		f                                        token.Family
-		scopes, amr                              sql.NullString
+		scopes, audience, amr                    sql.NullString
 		authenticated, created, expires, revoked sql.NullInt64
 	)
-	err := row.Scan(&f.ID, &f.GrantID, &f.ClientID, &f.Subject, &scopes, &authenticated, &amr, &f.ACR, &f.Status, &created, &expires, &revoked)
+	err := row.Scan(&f.ID, &f.GrantID, &f.ClientID, &f.Subject, &scopes, &audience, &authenticated, &amr, &f.ACR, &f.Status, &created, &expires, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
 	}
@@ -52,6 +52,9 @@ func scanFamily(row rowScanner) (*token.Family, error) {
 		return nil, err
 	}
 	if err := fromJSON(scopes, &f.Scopes); err != nil {
+		return nil, err
+	}
+	if err := fromJSON(audience, &f.Audience); err != nil {
 		return nil, err
 	}
 	if err := fromJSON(amr, &f.AMR); err != nil {
@@ -64,10 +67,10 @@ func scanFamily(row rowScanner) (*token.Family, error) {
 func scanAccess(row rowScanner) (*token.AccessToken, error) {
 	var (
 		t                        token.AccessToken
-		scopes                   sql.NullString
+		scopes, audience         sql.NullString
 		issued, expires, revoked sql.NullInt64
 	)
-	err := row.Scan(&t.Hash, &t.FamilyID, &t.GrantID, &t.ClientID, &t.Subject, &scopes, &t.Status, &issued, &expires, &revoked)
+	err := row.Scan(&t.Hash, &t.FamilyID, &t.GrantID, &t.ClientID, &t.Subject, &scopes, &audience, &t.Status, &issued, &expires, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
 	}
@@ -75,6 +78,9 @@ func scanAccess(row rowScanner) (*token.AccessToken, error) {
 		return nil, err
 	}
 	if err := fromJSON(scopes, &t.Scopes); err != nil {
+		return nil, err
+	}
+	if err := fromJSON(audience, &t.Audience); err != nil {
 		return nil, err
 	}
 	t.IssuedAt, t.ExpiresAt, t.RevokedAt = fromNanos(issued), fromNanos(expires), fromNanos(revoked)
@@ -102,8 +108,12 @@ func insertAccess(ctx context.Context, tx *sql.Tx, t *token.AccessToken) error {
 	if err != nil {
 		return err
 	}
-	return insertOnce(ctx, tx, `INSERT INTO access_tokens (`+accessColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (hash) DO NOTHING`,
-		t.Hash, t.FamilyID, t.GrantID, t.ClientID, t.Subject, scopes, string(t.Status),
+	audience, err := toJSON(t.Audience) // 空なら NULL
+	if err != nil {
+		return err
+	}
+	return insertOnce(ctx, tx, `INSERT INTO access_tokens (`+accessColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (hash) DO NOTHING`,
+		t.Hash, t.FamilyID, t.GrantID, t.ClientID, t.Subject, scopes, audience, string(t.Status),
 		mustNanos(t.IssuedAt), mustNanos(t.ExpiresAt), nanos(t.RevokedAt))
 }
 
@@ -120,6 +130,10 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 	if err != nil {
 		return err
 	}
+	audience, err := toJSON(family.Audience) // 空なら NULL
+	if err != nil {
+		return err
+	}
 	amr, err := toJSON(family.AMR)
 	if err != nil {
 		return err
@@ -133,8 +147,8 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 		if err != nil {
 			return err
 		}
-		if err := insertOnce(ctx, tx, `INSERT INTO token_families (`+familyColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (id) DO NOTHING`,
-			family.ID, family.GrantID, family.ClientID, family.Subject, scopes, nanos(family.AuthenticatedAt), amr, family.ACR,
+		if err := insertOnce(ctx, tx, `INSERT INTO token_families (`+familyColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (id) DO NOTHING`,
+			family.ID, family.GrantID, family.ClientID, family.Subject, scopes, audience, nanos(family.AuthenticatedAt), amr, family.ACR,
 			string(family.Status), mustNanos(family.CreatedAt), nanos(family.ExpiresAt), nanos(family.RevokedAt)); err != nil {
 			return err
 		}

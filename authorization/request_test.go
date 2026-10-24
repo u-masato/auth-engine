@@ -48,7 +48,14 @@ func testClients(t *testing.T) fakeResolver {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fakeResolver{"web": web, "cli": native, "svc": m2m, "limited": limited}
+	// files は files.example.com 向けの scope を持つ Web Client（resource ごとの scope 上限の検証用）
+	files, _, err := client.NewWeb(client.WebParams{ID: "files", Name: "Files",
+		RedirectURIs: []string{"https://app.example.com/cb?env=prod"},
+		Scopes:       []string{"openid", "files:read", "files:write"}}, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fakeResolver{"web": web, "cli": native, "svc": m2m, "limited": limited, "files": files}
 }
 
 // testResources は Opaque 2 件と JWT 1 件の Resource Server 設定。
@@ -58,6 +65,7 @@ func testResources(t *testing.T) *resource.Set {
 		{URI: "https://api.example.com"},
 		{URI: "https://mcp.example.com", Name: "MCP"},
 		{URI: "https://jwt.example.com", AccessTokenFormat: resource.FormatJWT},
+		{URI: "https://files.example.com", Scopes: []string{"files:read"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -132,8 +140,8 @@ func TestParseRequestResourceErrors(t *testing.T) {
 	}{
 		{"unknown", func(v url.Values) { v.Set("resource", "https://other.example.com") }, nil, "unknown resource"},
 		{"trailing slash differs", func(v url.Values) { v.Set("resource", "https://api.example.com/") }, nil, "unknown resource"},
-		{"relative", func(v url.Values) { v.Set("resource", "api.example.com") }, nil, "malformed resource"},
-		{"fragment", func(v url.Values) { v.Set("resource", "https://api.example.com#x") }, nil, "malformed resource"},
+		{"relative", func(v url.Values) { v.Set("resource", "api.example.com") }, nil, "invalid resource indicator"},
+		{"fragment", func(v url.Values) { v.Set("resource", "https://api.example.com#x") }, nil, "invalid resource indicator"},
 		{"mixed formats", func(v url.Values) {
 			v.Add("resource", "https://api.example.com")
 			v.Add("resource", "https://jwt.example.com")
@@ -178,6 +186,33 @@ func TestParseRequestResourceErrors(t *testing.T) {
 	p.Set("resource", "https://jwt.example.com")
 	if _, _, perr := parse(t, testClients(t), p); perr != nil {
 		t.Fatalf("single jwt resource: %v", perr)
+	}
+}
+
+func TestParseRequestResourceScopeLimit(t *testing.T) {
+	// files.example.com は files:read だけを許す。openid は OIDC の標準 scope なので制限を受けない
+	p := baseParams()
+	p.Set("client_id", "files")
+	p.Set("resource", "https://files.example.com")
+	p.Set("scope", "openid files:read")
+	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+		t.Fatalf("allowed scope: %v", perr)
+	}
+	p.Set("scope", "openid files:write")
+	_, _, perr := parse(t, testClients(t), p)
+	if perr == nil || perr.Code != CodeInvalidScope || !strings.Contains(perr.Description, "files:write") || !perr.Redirectable() {
+		t.Fatalf("scope outside the resource limit must be a redirectable invalid_scope: %+v", perr)
+	}
+	// resource なしなら resource の scope 上限は関係ない
+	p.Del("resource")
+	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+		t.Fatalf("without resource: %v", perr)
+	}
+	// 上限のない resource と組み合わせれば、どちらかが許すので通る
+	p.Add("resource", "https://files.example.com")
+	p.Add("resource", "https://api.example.com")
+	if _, _, perr := parse(t, testClients(t), p); perr != nil {
+		t.Fatalf("another resource without limit allows the scope: %v", perr)
 	}
 }
 

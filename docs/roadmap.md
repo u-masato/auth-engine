@@ -141,6 +141,12 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - 複数 `resource` の Access Token 形式の一致検査（ADR-0008 §3）は、形式を決める `Resource.AccessTokenFormat` がタスク 1 で入るので、認可要求側の検証に含めた。
   - `Resource.Scopes`（resource ごとの scope 上限）は型と検証だけを入れ、要求 scope の絞り込みはトークン発行側のタスク 2 で行う。認可要求の `scope` は AS 自身向け（`openid` 等）と resource 向けが混在するため、認可要求の段階で `resource.Scopes ⊆` を強制すると OIDC と併用できない。
   - `resource=`（値なし）は RFC 6749 §3.1 のとおり省略として扱う。正規形で重複する値は 1 つにまとめる。
+- **タスク 2（2026-10-24 完了）**: `Family.Audience` / `AccessToken.Audience`、`/token` の `resource` パラメータ（`authorization_code` は Code の `Resource` の部分集合、`refresh_token` は Family の `Audience` の部分集合、`client_credentials` は設定済みかつ Client の許可範囲内）、Introspection 応答の `aud`（常に配列。`resource` なしのトークンでは省略）、SQLite migration `00004` / PostgreSQL migration `00003`、`storagetest` の更新。計画との差分と補足:
+  - `resource.Set.Resolve`（正規化・設定照合・重複排除・形式一致）を認可要求とトークン要求で共有する。認可要求の `invalid_target` の説明文は `invalid resource indicator: ...` / `unknown resource: ...` の形になった。
+  - `Resource.Scopes` の制限を実装した。**OIDC の標準 scope（`openid` `profile` `email` `address` `phone` `offline_access`）は制限を受けない**。これらは認可サーバー自身（UserInfo、ID Token、Refresh Token）に向けた scope で、MCP クライアントが `openid` と resource 向け scope を同時に要求できなくなるのを避けるため。ADR-0008 §1 の「範囲外は `invalid_scope`」はこの例外付きで読む（ADR への追記はタスク 9）。複数 `resource` ではいずれかの resource が許せばよい（各 Resource Server は関係ない scope を無視する）。認可要求（`invalid_scope`、リダイレクト可）とトークン要求の両方で検査する。
+  - fail-closed の追加: 設定から外された resource を Code / Family が持っていると、`resource` 未指定でも `invalid_target` にする（設定変更後に古い Family で発行し続けない）。
+  - migration の番号は ADR-0008 の記述（SQLite `00003` / PostgreSQL `00002`）からずれ、タスク 1 で使った番号の次（SQLite `00004` / PostgreSQL `00003`）にした。タスク 1 の migration を適用済みの DB を壊さないため。
+  - UserInfo は変更なし（`openid` があれば `aud` に関わらず受理する）。テストで明示した。
 
 ### M3 で明示的に先送りするもの
 

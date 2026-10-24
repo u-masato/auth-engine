@@ -7,6 +7,8 @@
 // （RFC 6749 §4.1.2）。
 //
 // Access Token は Opaque（ADR-0006 §1）。平文は発行時にのみ返し、保存は SHA-256 の Hash のみ。
+// 認可要求の resource（RFC 8707）は Family の Audience として引き継ぎ、トークン要求の resource で
+// その部分集合に絞った Audience を Access Token に付ける（ADR-0008 §3）。
 //
 // Refresh Token は Family 作成からの絶対期限（既定 30 日）と最終使用からのスライド期限
 // （既定 14 日）を持つ。Rotation のたびに後継のスライド期限は延びるが絶対期限は超えない。
@@ -20,6 +22,8 @@
 //     §5.2 Error Response、§6 Refreshing an Access Token
 //   - RFC 6750 §4 Bearer Token の返却形式
 //   - RFC 7636 §4.5 code_verifier の送信、§4.6 サーバー側の検証
+//   - RFC 8707 §2.2 トークン要求の resource パラメータ（認可済みの範囲内で Audience を絞る）
+//   - RFC 7662 §2.2 Introspection 応答の aud
 //   - RFC 9700 §4.14 Refresh Token Protection（Rotation と再利用検知）
 //   - OIDC Core §12 Using Refresh Tokens（Refresh 応答の ID Token）
 package token

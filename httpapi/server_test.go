@@ -19,6 +19,7 @@ import (
 	"github.com/muno/auth-engine/internal/rand"
 	"github.com/muno/auth-engine/keys"
 	"github.com/muno/auth-engine/oidc"
+	"github.com/muno/auth-engine/resource"
 	"github.com/muno/auth-engine/storage/memory"
 	"github.com/muno/auth-engine/token"
 )
@@ -74,7 +75,8 @@ func newEnv(t *testing.T) *env {
 	}
 	engine, err := authengine.New(authengine.Config{
 		Issuer: issuer, Store: e.store, Keys: e.keys, Now: func() time.Time { return e.now },
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Resources: []resource.Resource{{URI: "https://mcp.example.com", Name: "MCP"}, {URI: "https://api.example.com"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -761,6 +763,78 @@ func TestClientCredentialsGrant(t *testing.T) {
 	rec = e.do(e.public, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
 	if !strings.Contains(rec.Body.String(), `"grant_types_supported":["authorization_code","refresh_token","client_credentials"]`) {
 		t.Fatalf("grant_types_supported: %s", rec.Body)
+	}
+}
+
+// TestResourceIndicator は resource 付きの認可要求からトークン要求までの流れと、Introspection の aud（RFC 8707、RFC 7662 §2.2）。
+func TestResourceIndicator(t *testing.T) {
+	e := newEnv(t)
+	rs, secret, err := client.NewMachine(client.MachineParams{ID: "rs", Name: "Resource Server", Scopes: []string{"api"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateClient(context.Background(), rs); err != nil {
+		t.Fatal(err)
+	}
+	introspect := func(tok string) map[string]any {
+		req := httptest.NewRequest(http.MethodPost, "/introspect", strings.NewReader(url.Values{"token": {tok}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rs", string(secret))
+		rec := e.do(e.public, req)
+		var in map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &in)
+		return in
+	}
+
+	// 未設定の resource は invalid_target でリダイレクト
+	q := authorizeQuery()
+	q.Set("resource", "https://other.example.com")
+	rec := e.do(e.public, httptest.NewRequest(http.MethodGet, "/authorize?"+q.Encode(), nil))
+	loc, _ := url.Parse(rec.Header().Get("Location"))
+	if rec.Code != http.StatusFound || loc.Query().Get("error") != "invalid_target" || loc.Query().Get("state") != "xyz" {
+		t.Fatalf("unknown resource: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+
+	// 2 つの resource で認可し、Interaction API が正規形を返す
+	q = authorizeQuery()
+	q.Add("resource", "https://MCP.example.com")
+	q.Add("resource", "https://api.example.com")
+	cookie, txnID, _ := e.authorize(q)
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/transactions/"+txnID, nil))
+	if !strings.Contains(rec.Body.String(), `"resource":["https://mcp.example.com","https://api.example.com"]`) {
+		t.Fatalf("transaction view: %s", rec.Body)
+	}
+	rec = e.resume(e.complete(txnID), cookie)
+	cb, _ := url.Parse(rec.Header().Get("Location"))
+	code := cb.Query().Get("code")
+
+	// トークン要求で mcp に絞る。Introspection の aud は配列
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirectURI}, "code_verifier": {rfcVerifier}, "resource": {"https://mcp.example.com"}}
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token: %d %s", rec.Code, rec.Body)
+	}
+	var res token.Response
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	in := introspect(res.AccessToken)
+	if aud, _ := in["aud"].([]any); in["active"] != true || len(aud) != 1 || aud[0] != "https://mcp.example.com" {
+		t.Fatalf("introspection aud: %s", in)
+	}
+	// Refresh Token の aud は Family の全部
+	in = introspect(res.RefreshToken)
+	if aud, _ := in["aud"].([]any); len(aud) != 2 {
+		t.Fatalf("refresh introspection aud: %v", in)
+	}
+	// Refresh で認可範囲外の resource を要求すると invalid_target
+	form = url.Values{"grant_type": {"refresh_token"}, "refresh_token": {res.RefreshToken}, "resource": {"https://other.example.com"}}
+	rec = e.do(e.public, e.tokenReq(form, "web", e.webSecret))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_target"`) {
+		t.Fatalf("refresh with unauthorized resource: %d %s", rec.Code, rec.Body)
+	}
+	// resource なしで得たトークンの Introspection には aud がない
+	plain := e.obtainTokens(t)
+	if in := introspect(plain.AccessToken); in["active"] != true || in["aud"] != nil {
+		t.Fatalf("token without resource must not carry aud: %v", in)
 	}
 }
 

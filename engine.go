@@ -151,6 +151,7 @@ func New(cfg Config) (*Engine, error) {
 		Clock:               clk,
 		Logger:              logger,
 		IDTokens:            e.IDTokens,
+		Resources:           resources,
 		RefreshTokenTTL:     refreshTTL,
 		RefreshTokenIdleTTL: refreshIdle,
 	}

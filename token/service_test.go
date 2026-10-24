@@ -76,6 +76,12 @@ func newFixture(t *testing.T) *fixture {
 // issueCode は Resume が発行したのと同等の Code を保存し、平文を返す。
 func (f *fixture) issueCode(t *testing.T, clientID string, explicit bool) string {
 	t.Helper()
+	return f.issueCodeFor(t, clientID, explicit, []string{"openid", "profile"}, nil)
+}
+
+// issueCodeFor は scope と resource を指定して Code を保存し、平文を返す。
+func (f *fixture) issueCodeFor(t *testing.T, clientID string, explicit bool, scopes, resources []string) string {
+	t.Helper()
 	plain, err := rand.Token("")
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +89,7 @@ func (f *fixture) issueCode(t *testing.T, clientID string, explicit bool) string
 	fam, _ := rand.Token("")
 	code := &authorization.AuthorizationCode{
 		Hash: rand.Hash(plain), TxnID: "t", ClientID: clientID, GrantID: f.grantID, FamilyID: fam,
-		Subject: "alice", RedirectURI: redirect, RedirectURIExplicit: explicit, Scopes: []string{"openid", "profile"},
+		Subject: "alice", RedirectURI: redirect, RedirectURIExplicit: explicit, Scopes: scopes, Resource: resources,
 		CodeChallenge: rfcChallenge, CodeChallengeMethod: "S256", Nonce: "n", AuthenticatedAt: now,
 		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
