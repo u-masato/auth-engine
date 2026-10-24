@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/storage"
@@ -32,8 +33,12 @@ func authenticateClient(ctx context.Context, clients client.Resolver, creds Cred
 	}
 	c, err := clients.GetClient(ctx, creds.ClientID)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		switch {
+		case errors.Is(err, storage.ErrNotFound):
 			return nil, protocolErr(CodeInvalidClient, "client authentication failed")
+		case errors.Is(err, client.ErrUnresolvable):
+			// CIMD 文書の取得・検証失敗。登録済み Client の列挙には役立たない情報なので理由を返す。
+			return nil, protocolErr(CodeInvalidClient, strings.TrimPrefix(err.Error(), "client: "))
 		}
 		return nil, err
 	}

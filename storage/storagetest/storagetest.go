@@ -197,6 +197,25 @@ func testClient(t *testing.T, s authengine.Store) {
 	if err != nil || len(gotOpen.Resources) != 0 || !gotOpen.AllowsResource("https://any.example.com") {
 		t.Fatalf("client without resources: %+v, %v", gotOpen, err)
 	}
+
+	// 事前登録した MCP Client（CIMD §7）: URL の client_id、client_uri、scope なし（上限なし）が往復する
+	const docURL = "https://mcp-client.example/oauth/client.json"
+	mcp, err := client.NewMCP(client.MetadataDocument{ClientID: docURL, ClientName: "MCP", ClientURI: "https://mcp-client.example",
+		RedirectURIs: []string{"http://localhost:3000/callback"}}, docURL, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateClient(ctx, mcp); err != nil {
+		t.Fatal(err)
+	}
+	gotMCP, err := s.GetClient(ctx, docURL)
+	if err != nil || gotMCP.Profile != client.ProfileMCP || gotMCP.ClientURI != "https://mcp-client.example" || len(gotMCP.Scopes) != 0 ||
+		!slices.Equal(gotMCP.RedirectURIs, mcp.RedirectURIs) {
+		t.Fatalf("mcp client round trip: %+v, %v", gotMCP, err)
+	}
+	if err := gotMCP.Validate(); err != nil {
+		t.Fatalf("restored mcp client must validate: %v", err)
+	}
 }
 
 // --- transaction ---

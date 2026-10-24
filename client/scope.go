@@ -2,10 +2,10 @@ package client
 
 import "fmt"
 
-// validateScopes は scope の一覧が空でなく、各要素が RFC 6749 §3.3 の scope-token 構文に
-// 従い、重複がないことを検証する。
-func validateScopes(scopes []string) error {
-	if len(scopes) == 0 {
+// validateScopes は scope の一覧が空でなく（optional なら空も可）、各要素が RFC 6749 §3.3 の
+// scope-token 構文に従い、重複がないことを検証する。
+func validateScopes(scopes []string, optional bool) error {
+	if len(scopes) == 0 && !optional {
 		return fmt.Errorf("%w: at least one scope is required", ErrInvalid)
 	}
 	seen := make(map[string]struct{}, len(scopes))
@@ -40,8 +40,12 @@ func ValidScopeToken(s string) bool {
 }
 
 // DisallowedScopes は requested のうち、このクライアントに許可されていない scope を返す。
-// 空なら全て許可されている。
+// 空なら全て許可されている。Scopes を持たない MCP Client（CIMD 文書に scope がない）は
+// 上限を持たず、要求 scope は resource ごとの上限（resource.Resource.Scopes）だけで絞られる。
 func (c *Client) DisallowedScopes(requested []string) []string {
+	if len(c.Scopes) == 0 && c.Profile.rules().scopesOptional {
+		return nil
+	}
 	var out []string
 	for _, s := range requested {
 		allowed := false

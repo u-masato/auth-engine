@@ -10,7 +10,7 @@ import (
 	"github.com/u-masato/auth-engine/storage"
 )
 
-const clientColumns = `id, profile, name, logo_uri, policy_uri, redirect_uris, scopes, resources, secret_hash,
+const clientColumns = `id, profile, name, logo_uri, policy_uri, client_uri, redirect_uris, scopes, resources, secret_hash,
 	access_token_ttl, id_token_alg, allow_insecure_localhost, created_at`
 
 func (s *Store) GetClient(ctx context.Context, id string) (*client.Client, error) {
@@ -28,7 +28,7 @@ func scanClient(row *sql.Row) (*client.Client, error) {
 		insecure     int
 		createdAt    sql.NullInt64
 	)
-	err := row.Scan(&c.ID, &c.Profile, &c.Name, &c.LogoURI, &c.PolicyURI, &redirectURIs, &scopes, &resources, &c.SecretHash,
+	err := row.Scan(&c.ID, &c.Profile, &c.Name, &c.LogoURI, &c.PolicyURI, &c.ClientURI, &redirectURIs, &scopes, &resources, &c.SecretHash,
 		&ttl, &c.IDTokenAlg, &insecure, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, storage.ErrNotFound
@@ -72,8 +72,8 @@ func (s *Store) CreateClient(ctx context.Context, c *client.Client) error {
 		if exists > 0 {
 			return storage.ErrAlreadyExists
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO clients (`+clientColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.ID, string(c.Profile), c.Name, c.LogoURI, c.PolicyURI, redirectURIs, scopes, resources, c.SecretHash,
+		_, err := tx.ExecContext(ctx, `INSERT INTO clients (`+clientColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			c.ID, string(c.Profile), c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources, c.SecretHash,
 			int64(c.AccessTokenTTL), c.IDTokenAlg, boolInt(c.AllowInsecureLocalhost), mustNanos(c.CreatedAt))
 		return err
 	})

@@ -26,8 +26,8 @@ var forbiddenSchemes = map[string]bool{
 // ResolveRedirectURI は認可要求の redirect_uri を登録情報と照合し、実際に使う URI を返す。
 //
 //   - requested が空: 登録 URI がちょうど 1 つならそれを使う（RFC 6749 §3.1.2.3）。
-//   - requested が非空: 完全一致を要求する（RFC 9700 §4.1.3）。Native の http loopback だけは
-//     ポート番号の違いを許す（RFC 8252 §7.3）。
+//   - requested が非空: 完全一致を要求する（RFC 9700 §4.1.3）。Native と MCP の http loopback だけは
+//     ポート番号の違いを許す（RFC 8252 §7.3）。http://localhost はポートも含めて完全一致。
 func (c *Client) ResolveRedirectURI(requested string) (string, error) {
 	if requested == "" {
 		if len(c.RedirectURIs) == 1 {
@@ -40,10 +40,15 @@ func (c *Client) ResolveRedirectURI(requested string) (string, error) {
 			return reg, nil
 		}
 	}
-	if c.Profile.rules().redirect == redirectNative && loopbackMatch(c.RedirectURIs, requested) {
+	if c.Profile.rules().redirect.ignoresLoopbackPort() && loopbackMatch(c.RedirectURIs, requested) {
 		return requested, nil
 	}
 	return "", ErrRedirectURIMismatch
+}
+
+// ignoresLoopbackPort は http loopback の redirect URI をポート番号を無視して照合する規則か（RFC 8252 §7.3）。
+func (p redirectPolicy) ignoresLoopbackPort() bool {
+	return p == redirectNative || p == redirectMCP
 }
 
 // loopbackMatch は requested が、登録済みの http loopback URI とポート番号以外で一致するかを返す。
@@ -100,6 +105,8 @@ func validateRedirectURIs(policy redirectPolicy, uris []string, allowInsecureLoc
 			ok = validWebRedirect(u, allowInsecureLocalhost)
 		case redirectNative:
 			ok = validNativeRedirect(u, allowInsecureLocalhost)
+		case redirectMCP:
+			ok = validMCPRedirect(u)
 		}
 		if !ok {
 			return fmt.Errorf("%w: redirect URI %q is not allowed for this profile", ErrInvalid, raw)
@@ -134,6 +141,23 @@ func validNativeRedirect(u *url.URL, allowInsecureLocalhost bool) bool {
 	default:
 		// カスタムスキーム（例: com.example.app:/callback）。スキーム以外に何かが必要。
 		return u.Opaque != "" || u.Host != "" || u.Path != ""
+	}
+}
+
+// validMCPRedirect: https、http://localhost、http loopback IP（ADR-0008 §4）。
+// MCP 仕様「Communication Security」は redirect URI を「localhost か HTTPS」と定め、CIMD 文書の例が
+// http://localhost:3000/callback を使うため、Native Profile と異なり localhost を既定で許す。
+// RFC 8252 §8.3 の懸念（localhost の名前解決の乗っ取り）は、Interaction App が同意画面で
+// redirect URI のホスト名を表示することで補う（docs/interaction-api.md）。
+func validMCPRedirect(u *url.URL) bool {
+	switch u.Scheme {
+	case "https":
+		return u.Host != ""
+	case "http":
+		host := u.Hostname()
+		return isLoopbackIP(host) || isLocalhost(host)
+	default:
+		return false
 	}
 }
 

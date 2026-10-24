@@ -31,9 +31,9 @@ var ErrInvalid = errors.New("client: invalid client")
 // Secret はクライアントシークレットの平文。生成時に 1 回だけ返し、保存はハッシュのみ。
 type Secret string
 
-// Client は登録済みの OAuth 2.0 クライアント。
+// Client は登録済み、または CIMD 文書から解決した OAuth 2.0 クライアント。
 //
-// 構築は NewWeb / NewNative / NewMachine で行う。フィールドは Adapter の直列化・復元の
+// 構築は NewWeb / NewNative / NewMachine / NewMCP で行う。フィールドは Adapter の直列化・復元の
 // ために公開しているが、コア内では直接代入せず、復元後は Validate で検証する。
 type Client struct {
 	ID      string
@@ -43,6 +43,9 @@ type Client struct {
 	Name      string
 	LogoURI   string
 	PolicyURI string
+	// ClientURI はクライアントのホームページ（RFC 7591 §2 の client_uri）。CIMD 文書から組み立てた
+	// MCP Client だけが持ち、登録済み Client では空（ADR-0008 §6）。
+	ClientURI string
 
 	// RedirectURIs は登録済みの redirect URI。Machine では空。
 	RedirectURIs []string
@@ -240,7 +243,7 @@ func (c *Client) Validate() error {
 	if c.Name == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalid)
 	}
-	if err := validateScopes(c.Scopes); err != nil {
+	if err := validateScopes(c.Scopes, r.scopesOptional); err != nil {
 		return err
 	}
 	if err := validateRedirectURIs(r.redirect, c.RedirectURIs, c.AllowInsecureLocalhost); err != nil {
@@ -300,6 +303,9 @@ func (c *Client) AcceptsAuthMethod(m AuthMethod) bool {
 
 // RequiresPKCE は Authorization Code Grant で PKCE（S256）を必須とするかを返す。
 func (c *Client) RequiresPKCE() bool { return c.Profile.rules().requirePKCE }
+
+// RequiresResource は認可要求に resource（RFC 8707）を必須とするかを返す（MCP Profile。ADR-0008 §4）。
+func (c *Client) RequiresResource() bool { return c.Profile.rules().requiresResource }
 
 // IssuesRefreshToken は Refresh Token を発行するかを返す。
 func (c *Client) IssuesRefreshToken() bool { return c.Profile.rules().issuesRefreshToken }

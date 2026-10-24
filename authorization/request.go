@@ -34,8 +34,12 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 	}
 	c, err := clients.GetClient(ctx, values.Get("client_id"))
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		switch {
+		case errors.Is(err, storage.ErrNotFound):
 			return nil, nil, &Error{Code: CodeInvalidRequest, Description: "unknown client_id"}
+		case errors.Is(err, client.ErrUnresolvable):
+			// CIMD 文書の取得・検証失敗や信頼ポリシーによる拒否。理由はクライアント開発者の助けになるので返す。
+			return nil, nil, &Error{Code: CodeInvalidRequest, Description: strings.TrimPrefix(err.Error(), "client: ")}
 		}
 		return nil, nil, &Error{Code: CodeServerError, Description: "client lookup failed", Cause: err}
 	}
@@ -119,6 +123,10 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 	res, err := resources.Resolve(values["resource"])
 	if err != nil {
 		return fail(CodeInvalidTarget, resourceErrorDescription(err))
+	}
+	// MCP Client は resource が必須（ADR-0008 §4）。RFC 8707 は欠落のエラーを定めないので invalid_request。
+	if len(res) == 0 && c.RequiresResource() {
+		return fail(CodeInvalidRequest, "resource is required for this client (RFC 8707)")
 	}
 	for _, uri := range res {
 		if !c.AllowsResource(uri) {
