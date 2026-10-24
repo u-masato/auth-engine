@@ -14,3 +14,6 @@ coverage.html
 .idea/
 .vscode/
 .DS_Store
+
+# デモ起動 skill の生成物（.claude/skills/run-demo）
+.demo/

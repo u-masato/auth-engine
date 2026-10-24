@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: full-flow-tokens
+expected_outcome: |
+  画面操作なしで Authorization Code + PKCE が最後まで通り、access_token と id_token が取れたことが報告される。トークン全文は貼らずに要約する。

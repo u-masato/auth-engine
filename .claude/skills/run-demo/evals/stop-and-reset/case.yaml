@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: stop-and-reset
+expected_outcome: |
+  起動中のデモサーバーが止まり、auth.db（と keys.json）が削除されて次回起動で作り直される状態になる。無関係なプロセスは殺さない。

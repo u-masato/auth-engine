@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: start-demo-server
+expected_outcome: |
+  デモサーバーがバックグラウンドで起動したまま残り、issuer・Discovery・ログイン画面の URL と止め方が報告される。作業ツリーに auth.db や keys.json が散らからない。
