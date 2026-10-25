@@ -97,7 +97,7 @@
 - `private_key_jwt`、PAR、DPoP、Token Exchange（M4）
 - Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
 - Basic OP 認定（PKCE 必須を維持するため目標にしない。必要になれば新 Profile を追加して対応する。[conformance.md](conformance.md)「PKCE 必須との非互換」の判断）
-- Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ
+- Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ → 2026-10-25 に issue #2 で追加した（`DELETE /grants?subject=&client_id=`。成功 `204`、冪等、未登録 `404 not_found`、パラメータ欠落 `400 invalid_request`。ADR-0006 §5）
 
 ## M3 のタスク順序
 

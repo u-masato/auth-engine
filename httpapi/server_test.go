@@ -1110,6 +1110,70 @@ func TestInteractionListGrants(t *testing.T) {
 	}
 }
 
+func TestInteractionRevokeGrant(t *testing.T) {
+	e := newEnv(t)
+	tokens := e.obtainTokens(t) // alice が web に同意し、トークンを得る
+	rs, secret, err := client.NewMachine(client.MachineParams{ID: "rs", Name: "Resource Server", Scopes: []string{"api"}}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateClient(context.Background(), rs); err != nil {
+		t.Fatal(err)
+	}
+	introspect := func(tok string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/introspect", strings.NewReader(url.Values{"token": {tok}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("rs", string(secret))
+		return strings.TrimSpace(e.do(e.public, req).Body.String())
+	}
+	if !strings.Contains(introspect(tokens.AccessToken), `"active":true`) {
+		t.Fatal("token must be active before revoke")
+	}
+
+	// subject・client_id の欠落は 400、認証なしは 401、未登録の組は 404
+	for _, path := range []string{"/grants?subject=alice", "/grants?client_id=web", "/grants"} {
+		rec := e.do(e.internal, e.interactionReq(http.MethodDelete, path, nil))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"invalid_request"`) {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if rec := e.do(e.internal, httptest.NewRequest(http.MethodDelete, "/grants?subject=alice&client_id=web", nil)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: %d", rec.Code)
+	}
+	if rec := e.do(e.internal, e.interactionReq(http.MethodDelete, "/grants?subject=bob&client_id=web", nil)); rec.Code != http.StatusNotFound ||
+		!strings.Contains(rec.Body.String(), `"not_found"`) {
+		t.Fatalf("unknown grant: %d %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(introspect(tokens.AccessToken), `"active":true`) {
+		t.Fatal("rejected requests must not revoke anything")
+	}
+
+	// 連携解除: 204。Grant と配下のトークンがすべて失効する
+	rec := e.do(e.internal, e.interactionReq(http.MethodDelete, "/grants?subject=alice&client_id=web", nil))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("revoke grant: %d %v %s", rec.Code, rec.Header(), rec.Body)
+	}
+	for _, tok := range []string{tokens.AccessToken, tokens.RefreshToken} {
+		if got := introspect(tok); got != `{"active":false}` {
+			t.Fatalf("token must be inactive after revoke: %s", got)
+		}
+	}
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}}
+	if rec := e.do(e.public, e.tokenReq(form, "web", e.webSecret)); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("refresh after revoke: %d %s", rec.Code, rec.Body)
+	}
+	rec = e.do(e.internal, e.interactionReq(http.MethodGet, "/grants?subject=alice&client_id=web", nil))
+	if strings.TrimSpace(rec.Body.String()) != `{"grants":[]}` {
+		t.Fatalf("grants after revoke: %s", rec.Body)
+	}
+
+	// 冪等: 失効済みでも 204
+	if rec := e.do(e.internal, e.interactionReq(http.MethodDelete, "/grants?subject=alice&client_id=web", nil)); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke twice: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func mustGrantID(t *testing.T, e *env) string {
 	t.Helper()
 	g, err := e.store.FindGrant(context.Background(), "web", "alice")

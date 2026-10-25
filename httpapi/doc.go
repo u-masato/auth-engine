@@ -8,7 +8,7 @@
 //     GET /.well-known/openid-configuration
 //   - InteractionHandler: Interaction App だけが使うバックチャネル API。
 //     GET /transactions/{id}、POST /transactions/{id}/complete、POST /transactions/{id}/reject、
-//     GET /grants。利用者は内部ネットワーク専用のリスナーに bind することを推奨する。
+//     GET /grants、DELETE /grants。利用者は内部ネットワーク専用のリスナーに bind することを推奨する。
 //
 // HTTP 層は薄く保つ。パラメータの取り出し、Cookie、ステータスコードへの写像、JSON の
 // 直列化だけを行い、プロトコルの判断はすべて authorization / token の Service に委ねる。

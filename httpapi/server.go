@@ -105,6 +105,7 @@ func (s *Server) InteractionHandler() http.Handler {
 	mux.HandleFunc("POST /transactions/{id}/complete", s.handleComplete)
 	mux.HandleFunc("POST /transactions/{id}/reject", s.handleReject)
 	mux.HandleFunc("GET /grants", s.handleListGrants)
+	mux.HandleFunc("DELETE /grants", s.handleRevokeGrant)
 	return s.requireInteractionAuth(mux)
 }
 

@@ -28,7 +28,7 @@
 - 認証は `Authorization: Bearer <token>`。トークンはエンジン側の `httpapi.Config.InteractionAuth`（既定 `BearerAuthenticator`）に設定した値。
 - 認証失敗は `401` と `WWW-Authenticate: Bearer realm="interaction"`。
 - 要求本文は JSON、64 KB まで。未知のフィールドがあると `400 invalid_body`。
-- 応答は常に `Content-Type: application/json`、`Cache-Control: no-store`。
+- 応答は常に `Cache-Control: no-store`。本文があるときは `Content-Type: application/json`（`DELETE /grants` の成功は `204` で本文なし）。
 
 ## エラー応答の形
 
@@ -40,8 +40,9 @@
 | --- | --- | --- | --- |
 | 400 | `invalid_body` | JSON が不正、または未知のフィールド | 実装の不具合。修正する |
 | 400 | `invalid_outcome` | 結果が契約に反する（後述） | 実装の不具合、または `max_age` 違反。説明文を見て対処 |
+| 400 | `invalid_request` | `/grants` の必須パラメータ（`subject`、`DELETE` では `client_id` も）がない | 実装の不具合。修正する |
 | 401 | `unauthorized` | Bearer トークン不一致 | 設定を確認 |
-| 404 | `not_found` | Txn が存在しない | 「最初からやり直してください」を表示 |
+| 404 | `not_found` | Txn が存在しない（`DELETE /grants` では該当する Grant がない） | Txn なら「最初からやり直してください」を表示。Grant なら連携済みアプリ一覧を描き直す |
 | 409 | `not_pending` | 既に Complete / Reject 済み | 同上。二重送信の可能性 |
 | 410 | `expired` | Txn の期限切れ（既定 10 分） | 同上 |
 | 500 | `server_error` | エンジン内部エラー | 一時的な障害として表示 |
@@ -182,9 +183,20 @@ Claims は返さない。`subject` がないときは `400 invalid_request`。
 
 Grant の `scopes` は過去の同意の和集合である。Complete の `granted_scopes` はその回に承認された scope だけを渡せばよく、エンジン側で和集合に加える。
 
-### 連携の解除
+## DELETE /grants?subject=...&client_id=...
 
-「このアプリとの連携を解除する」操作は M2 では HTTP では提供せず、Go API `Engine.Grants.Revoke(ctx, clientID, subject)` で行う（Grant と配下の全トークンが失効する）。Interaction App が別プロセスの場合は、HTTP での提供が必要になった時点で `DELETE /grants` を追加する。
+「このアプリとの連携を解除する」操作。`client_id` × `subject` の Grant を失効させ、その Grant から発行した全トークン（全 Token Family の Access Token・Refresh Token）も同時に失効させる。以後の Introspection は `active: false` を返し、Refresh Token は `invalid_grant` になる。次にそのアプリが認可を求めたときは、同意画面からやり直しになる。2026-10-25 に追加した（それまでは Go API `Engine.Grants.Revoke` のみ）。
+
+| 応答 | 条件 |
+| --- | --- |
+| `204`（本文なし） | 失効させた。既に失効済みでも `204`（冪等） |
+| `404 not_found` | その `client_id` × `subject` の Grant がない |
+| `400 invalid_request` | `subject` か `client_id` がない |
+
+- `subject` と `client_id` はどちらも必須。`subject` の全 Grant を一度に解除する操作はない。一覧（`GET /grants?subject=...`）から 1 件ずつ呼ぶ。
+- Interaction App がこの操作を呼ぶ前に、操作しているのが `subject` 本人であることを確かめること。エンジンは Interaction App の認証しか見ない。
+- JWT 形式の Access Token をローカル検証する Resource Server には、失効が `exp` まで伝わらない（[組み込みガイド §7](embedding.md#7-resource-server)）。
+- 同じ操作は Go API `Engine.Grants.Revoke(ctx, clientID, subject)` でも行える。
 
 ## Go から直接呼ぶ場合
 
