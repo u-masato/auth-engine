@@ -78,5 +78,5 @@ P0 では「将来の Profile」として、Client の取得経路を `client.Re
 
 ## 影響
 
-- Client の登録はまず Go API のみ（`Store.CreateClient`）。登録用 HTTP API・CLI は `examples/` に置き、コアには含めない。
+- Client の登録はまず Go API のみ（`Store.CreateClient`）。登録用 HTTP API・CLI は `examples/` に置き、コアには含めない。2026-10-25 に更新（`Client.Update` → `Store.UpdateClient`）と削除（`Store.DeleteClient`）を追加した。`Client.Update` は §2 の開放項目だけを受け取り、`Store.UpdateClient` は保存済みの Profile と違う値を `storage.ErrStateConflict` で拒否する（§4）。
 - Profile の条件表は `client/profile.go` にテーブルとして持ち、テストで表と実装の一致を検証する。MCP Client の列も同じテーブルにある。

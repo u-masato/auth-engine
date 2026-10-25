@@ -405,8 +405,13 @@ func registerRedirect(t *testing.T, s *system, clientID, redirectURI string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Store に更新操作はない（M1 では登録のみ）ので、SQL で直接書き換える。
-	if _, err := s.store.DB().ExecContext(ctx, `UPDATE clients SET redirect_uris = ? WHERE id = ?`, `["`+redirectURI+`"]`, c.ID); err != nil {
+	p := c.UpdateParams()
+	p.RedirectURIs = []string{redirectURI}
+	next, err := c.Update(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.UpdateClient(ctx, next); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -90,6 +90,51 @@ func (s *Store) CreateClient(_ context.Context, c *client.Client) error {
 	return nil
 }
 
+func (s *Store) UpdateClient(_ context.Context, c *client.Client) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.clients[c.ID]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if cur.Profile != c.Profile {
+		return storage.ErrStateConflict
+	}
+	next := clone(c)
+	next.CreatedAt = cur.CreatedAt
+	s.clients[c.ID] = next
+	return nil
+}
+
+func (s *Store) DeleteClient(_ context.Context, id string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.clients[id]; !ok {
+		return storage.ErrNotFound
+	}
+	delete(s.clients, id)
+	for _, g := range s.grants {
+		if g.ClientID != id {
+			continue
+		}
+		if g.Active() {
+			g.Status = grant.StatusRevoked
+			g.RevokedAt = now
+		}
+		for _, f := range s.families {
+			if f.GrantID == g.ID {
+				s.revokeFamilyLocked(f, now)
+			}
+		}
+	}
+	for h, c := range s.codes {
+		if c.ClientID == id {
+			delete(s.codes, h)
+		}
+	}
+	return nil
+}
+
 // --- authorization.Store ---
 
 func (s *Store) CreateTransaction(_ context.Context, txn *authorization.Transaction) error {
