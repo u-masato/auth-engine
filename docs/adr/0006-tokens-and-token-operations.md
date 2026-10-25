@@ -61,7 +61,7 @@ Txn が消費された後も `/userinfo` は Claims を返す必要がある。�
 | --- | --- | --- |
 | `Inspect(token)` | 採用（M2） | Introspection エンドポイントと同じ Use Case。Go API として公開 |
 | `RevokeToken(token)` | 採用（M2） | Revocation（RFC 7009）と同じ Use Case。Refresh Token の失効は Family 全体を失効 |
-| `RevokeGrant(clientID, subject)` | 採用（M2） | 「このアプリとの連携を解除する」ための管理操作。プロトコル上の対応物はなく、Go API のみ |
+| `RevokeGrant(clientID, subject)` | 採用（M2） | 「このアプリとの連携を解除する」ための管理操作。プロトコル上の対応物はない。M2 は Go API のみ。2026-10-25 に Interaction API の `DELETE /grants?subject=&client_id=` でも提供した（別プロセスの Interaction App から呼べるように。成功 `204`、失効済みでも `204`、未登録 `404`） |
 | `ListGrants(subject)` | 採用（M2） | 同上。Interaction App が「連携済みアプリ一覧」を描くための読み取り |
 | `Mint`（信頼されたバックエンドから任意 Access Token 発行） | **却下（P0〜P2）** | 下記 |
 | `Reissue` | **却下** | Opaque では Claims を持たないため成立しない。JWT AT を導入しても「新規発行 + 旧失効」の組合せで表現できる |

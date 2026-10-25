@@ -193,6 +193,56 @@ func TestRevocationAndIntrospection(t *testing.T) {
 	}
 }
 
+// Interaction App が DELETE /grants で連携を解除すると、そのアプリのトークンはすべて使えなくなる。
+func TestRevokeGrantViaInteractionAPI(t *testing.T) {
+	s := newSystem(t, true)
+	ctx := context.Background()
+	flow, tok := s.runCodeFlow(t, browser(t), "web", s.webSecret, []string{"openid"})
+
+	rsID, rsSecret := s.registerMachine(t, "rs", []string{"api"})
+	rs, err := oauthclient.NewCodeFlow(flow.Metadata, rsID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs.ClientSecret = rsSecret
+	active := func(tk string) any {
+		t.Helper()
+		m, err := rs.Introspect(ctx, tk, "")
+		if err != nil {
+			t.Fatalf("introspect: %v", err)
+		}
+		return m["active"]
+	}
+	if active(tok.AccessToken) != true {
+		t.Fatal("token must be active before revoke")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.internal.URL+"/grants?subject=alice&client_id=web", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE /grants: %d", res.StatusCode)
+	}
+
+	for _, tk := range []string{tok.AccessToken, tok.RefreshToken} {
+		if got := active(tk); got != false {
+			t.Fatalf("token must be inactive after revoke: active=%v", got)
+		}
+	}
+	_, err = flow.Refresh(ctx, tok.RefreshToken, "")
+	var terr *oauthclient.TokenError
+	if !errors.As(err, &terr) || terr.Code != "invalid_grant" {
+		t.Fatalf("refresh after revoke: %v", err)
+	}
+}
+
 func TestClientCredentialsFlow(t *testing.T) {
 	s := newSystem(t, true)
 	ctx := context.Background()

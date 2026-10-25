@@ -82,7 +82,7 @@ type Engine struct {
 
 	Authorization *authorization.Service
 	Token         *token.Service
-	// Grants は Grant の管理操作（一覧・連携解除）。Go API と Interaction API の GET /grants が使う。
+	// Grants は Grant の管理操作（一覧・連携解除）。Go API と Interaction API の GET /grants・DELETE /grants が使う。
 	Grants   *grant.Service
 	IDTokens *oidc.IDTokenIssuer
 	UserInfo *oidc.UserInfoService
