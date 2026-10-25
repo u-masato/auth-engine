@@ -107,4 +107,4 @@ const (
 - README・[embedding.md](../embedding.md)・[docs/README.md](../README.md) の「PKCE 非対応のクライアントは接続できない」を「`nonce` を使う OIDC クライアントは `web-legacy` で接続できる」に改める。
 - examples: `cmd/server` の Profile の switch と `console` の登録フォームに `web-legacy` を足す。`cmd/server` は登録済みの Client を飛ばすので、Conformance を再実行する前に `conformance.db` を消す手順を conformance.md に書く。
 - テスト: §2 の各分岐、§3 の 4 通りの組み合わせ、PKCE を付けた要求が `web-legacy` でも従来どおり検証されること、既存 Profile の挙動が変わらないこと（`profile_test.go` の表と `authorization` / `token` の回帰）。
-- roadmap 上の位置（M4 の先頭タスクにするか、単独のタスクにするか）は M4 を分解するときに決める。
+- roadmap 上の位置は M4a のタスク 1（[roadmap.md](../roadmap.md)「M4a のタスク順序（案）」、[ADR-0010](0010-client-auth-and-sender-constraint.md)）。小さく、合意済みで、M4a と同じく Conformance Suite の評価範囲を広げる目的を持つため。
