@@ -17,7 +17,8 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
 | [ADR-0008 MCP 連携](adr/0008-mcp-integration.md) | Resource Indicators と Audience、MCP Client Profile、CIMD Resolver、JWT Access Token、Resource Server ミドルウェア、DCR の不採用 |
 | [ADR-0009 Web Legacy Profile](adr/0009-web-legacy-profile.md) | PKCE を任意にする confidential Profile。省略時は `openid` と `nonce` を必須にし、PKCE Downgrade を拒否する。Conformance Suite（Basic OP）の評価範囲を広げるため（未実装） |
-| [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1〜M3 の実施結果と計画からの差分 |
+| [ADR-0010 クライアント認証と送信者拘束](adr/0010-client-auth-and-sender-constraint.md) | **草案**。M4a の論点 1〜4: 認証方式は Profile が許す集合から資格情報で決める、`jwks` / `jwks_uri` と `keys` の取得器、`jti` のリプレイ記録は Store Port、DPoP の範囲、FAPI 2.0 の要件を Profile `fapi` として束ねる（PAR 必須・DPoP 必須・Rotation なし） |
+| [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1〜M3 の実施結果と計画からの差分、M4a の分解（案） |
 | [組み込みガイド](embedding.md) | エンジンを組み込む人向け。責務の分担、Store の選択、Client 登録、HTTP への公開、鍵、監査ログ、本番前の確認 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 | [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
