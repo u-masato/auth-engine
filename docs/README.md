@@ -1,7 +1,7 @@
 # 設計ドキュメント
 
 Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」の設計判断をまとめる。
-2026-10-24 にユーザーと合意し、すべて「採用」とした。以後の変更は新しい ADR で上書きし、既存 ADR には参照を追記する（M3 では ADR-0008 の決定を ADR-0001 / 0004 / 0005 / 0006 / 0007 に追記した。2026-10-25）。
+2026-10-24 にユーザーと合意し、すべて「採用」とした。以後の変更は新しい ADR で上書きし、既存 ADR には参照を追記する（M3 では ADR-0008 の決定を ADR-0001 / 0004 / 0005 / 0006 / 0007 に追記した。ADR-0009 の決定は ADR-0001 / 0004 に追記した。2026-10-25）。
 
 ## 文書一覧
 
@@ -11,11 +11,12 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0001 スコープと設計原則](adr/0001-scope-and-principles.md) | 本体と外部アプリの責務分担、設計原則、P0 で提供しないもの |
 | [ADR-0002 技術スタック](adr/0002-tech-stack.md) | 言語・ライブラリ・ツールの採否 |
 | [ADR-0003 Interaction App との契約](adr/0003-interaction-contract.md) | **最重要**。Authorization Transaction の引き渡し、完了通知、認証、タイムアウト、ハイジャック対策 |
-| [ADR-0004 Client Profile](adr/0004-client-profiles.md) | Web / Native・CLI / M2M で固定する項目と開放する項目 |
+| [ADR-0004 Client Profile](adr/0004-client-profiles.md) | Web / Native・CLI / M2M / MCP / Web Legacy で固定する項目と開放する項目 |
 | [ADR-0005 Storage Port](adr/0005-storage-port.md) | Port の粒度、Code 原子的消費・Rotation・Grant 失効の Adapter 側保証 |
 | [ADR-0006 トークン形式と Token Operations](adr/0006-tokens-and-token-operations.md) | Opaque AT + JWT ID Token、Mint / Reissue の却下 |
 | [ADR-0007 パッケージ・モジュール構成](adr/0007-package-layout.md) | 文脈ごとのパッケージ分割、Adapter の別モジュール化 |
 | [ADR-0008 MCP 連携](adr/0008-mcp-integration.md) | Resource Indicators と Audience、MCP Client Profile、CIMD Resolver、JWT Access Token、Resource Server ミドルウェア、DCR の不採用 |
+| [ADR-0009 Web Legacy Profile](adr/0009-web-legacy-profile.md) | PKCE を任意にする confidential Profile。省略時は `openid` と `nonce` を必須にし、PKCE Downgrade を拒否する。Conformance Suite（Basic OP）の評価範囲を広げるため（未実装） |
 | [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1〜M3 の実施結果と計画からの差分 |
 | [組み込みガイド](embedding.md) | エンジンを組み込む人向け。責務の分担、Store の選択、Client 登録、HTTP への公開、鍵、監査ログ、本番前の確認 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
@@ -51,3 +52,4 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 5. ADR-0007 のパッケージ構成（3 層を文脈ごとに統合、Store インターフェースは使う側で定義、合成 Store はルート、永続化は公開フィールド + 規約）
 6. モジュールパスは `github.com/u-masato/auth-engine`、リポジトリ名は `auth-engine`
 7. ADR-0008 の MCP 連携の 8 点（Resource Server は静的設定、Access Token の形式は resource ごと、MCP Client Profile で `http://localhost` を許可、CIMD はコアの `cimd` パッケージ、Resource Server ミドルウェアはコアの `resourceserver` パッケージ、DCR は実装しない）。M3 着手前に合意
+8. ADR-0009 の Web Legacy Profile（2026-10-25 合意）。PKCE を任意にする confidential Profile を新設し、Web Profile は緩めない。PKCE を省略する要求は `openid` と `nonce` を必須とし、`oidcc-ensure-request-without-nonce-succeeds-for-code-flow` は期待された失敗として扱う（Basic OP 認定は目標にしない）
