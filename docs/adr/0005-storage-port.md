@@ -30,6 +30,8 @@
 | `IssueTokens(ctx, grantID, tokens)` | Grant が `active` のときだけ挿入。違えば `ErrGrantRevoked` | 1 トランザクションで Grant 行を読み（PostgreSQL は `FOR UPDATE`、SQLite は書込トランザクション自体が直列）→ `INSERT` |
 | `RevokeGrant(ctx, grantID, now)` | Grant と、それに属する全 Token Family・全トークンを失効 | 1 トランザクションで `UPDATE grants` → `UPDATE refresh_tokens` → `UPDATE access_tokens` |
 | `RevokeTokenFamily(ctx, familyID, now)` | Family 内の全トークンを失効 | 同上 |
+| `UpdateClient(ctx, client)`（2026-10-25 追加） | 保存済みの Profile が一致するときだけ開放項目を置き換える。違えば `ErrStateConflict`、なければ `ErrNotFound`。ID・Profile・作成日時は変えない（ADR-0004 §4） | `UPDATE clients SET ... WHERE id=? AND profile=?` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
+| `DeleteClient(ctx, clientID, now)`（2026-10-25 追加） | Client を削除し、その Client の全 Grant と配下の全 Token Family・全トークンを失効、Authorization Code を削除。なければ `ErrNotFound` で何もしない。Grant の行は失効済みとして残す。進行中の Txn には触れないので、削除後の Resume で Grant が active に戻りうる。同じ ID の作り直しは Txn の有効期限後に行う | 1 トランザクションで `DELETE FROM clients`（rows=1 確認）→ `UPDATE grants` → `UPDATE refresh_tokens` / `access_tokens` / `token_families` → `DELETE FROM authorization_codes`。PostgreSQL では Grant の行ロックで `IssueTokens`（`FOR UPDATE`）と直列になる |
 
 SQLite 側の前提:
 
