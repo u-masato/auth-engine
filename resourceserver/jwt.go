@@ -220,7 +220,8 @@ func (v *JWTVerifier) jwksTTL(h http.Header) time.Duration {
 		name, val, _ := strings.Cut(strings.TrimSpace(d), "=")
 		if strings.EqualFold(strings.TrimSpace(name), "max-age") {
 			if sec, err := strconv.ParseInt(strings.Trim(strings.TrimSpace(val), `"`), 10, 64); err == nil && sec >= 0 {
-				ttl = time.Duration(sec) * time.Second
+				// time.Duration に収まらない秒数は掛け算で負に溢れて下限に丸められてしまうので、先に上限で抑える
+				ttl = time.Duration(min(sec, int64(MaxJWKSTTL/time.Second))) * time.Second
 			}
 		}
 	}
