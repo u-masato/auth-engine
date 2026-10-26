@@ -38,8 +38,13 @@ func TestParseClientIDURL(t *testing.T) {
 		{"https://mcp-client.example/client#", false},
 		{"https://mcp-client.example/a/./client", false},
 		{"https://mcp-client.example/a/../client", false},
-		{"https:///client", false}, // host なし
-		{"web-app", false},         // Store の client_id
+		{"https://mcp-client.example/a/%2e%2e/client", false}, // エンコードした dot セグメント（RFC 3986 §2.3）
+		{"https://mcp-client.example/a/%2E/client", false},
+		{"https://mcp-client.example/a/.%2e/client", false},
+		{"https://mcp-client.example/a%2F..%2Fclient", false}, // 復号すると dot セグメントになる（安全側）
+		{"https://mcp-client.example/a/%2e%2ex/client", true}, // "..x" は dot セグメントではない
+		{"https:///client", false},                            // host なし
+		{"web-app", false},                                    // Store の client_id
 		{"", false},
 		{"HTTPS://mcp-client.example/client", false}, // 文書の client_id と単純比較するので小文字のみ
 	}

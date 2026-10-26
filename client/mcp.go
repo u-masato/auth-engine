@@ -70,9 +70,14 @@ func ParseClientIDURL(id string) (*url.URL, error) {
 	case strings.Contains(id, "#"): // 空の fragment（末尾の "#"）も拒否する
 		return nil, fmt.Errorf("%w: fragment is not allowed", ErrNotMetadataURL)
 	}
-	for seg := range strings.SplitSeq(u.EscapedPath(), "/") {
-		if seg == "." || seg == ".." {
-			return nil, fmt.Errorf("%w: dot segments are not allowed", ErrNotMetadataURL)
+	// パーセントエンコードした "."（%2e）は "." と同じ（RFC 3986 §2.3、§6.2.2.2）。文書サーバーが復号して
+	// 別の path を返したり、path で判断する TrustPolicy をすり抜けたりしないよう、復号後の path も確かめる。
+	// 復号で %2F が "/" に変わり、エンコードした形では 1 セグメントだったものも拒否されるが、安全側に倒す。
+	for _, p := range []string{u.EscapedPath(), u.Path} {
+		for seg := range strings.SplitSeq(p, "/") {
+			if seg == "." || seg == ".." {
+				return nil, fmt.Errorf("%w: dot segments are not allowed", ErrNotMetadataURL)
+			}
 		}
 	}
 	return u, nil
