@@ -1,0 +1,50 @@
+name: バグ報告
+description: 期待どおりに動かない、仕様と食い違う
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **脆弱性はここに書かないでください。** Code・トークンの漏洩、なりすまし、オープンリダイレクトにつながるものは [SECURITY.md](https://github.com/u-masato/auth-engine/blob/main/SECURITY.md) の非公開の経路で報告してください。
+        トークン、Client Secret、署名鍵などの秘密値は伏せてください。
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きたか
+      description: 実際の振る舞いと、期待した振る舞い
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: 関係する仕様と節
+      description: "わかれば（例: RFC 6749 §4.1.2.1、OIDC Core §3.1.2.1、CIMD §3）"
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      description: 最小のテストコード、HTTP のやり取り、`examples/standalone` での手順など
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: バージョン
+      description: コミットまたはタグ（`go list -m github.com/u-masato/auth-engine` の出力など）
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: Store
+      options:
+        - SQLite（adapters/sqlite）
+        - PostgreSQL（adapters/postgres）
+        - storage/memory
+        - 独自の Adapter
+        - 関係しない
+  - type: textarea
+    id: env
+    attributes:
+      label: 環境
+      description: Go のバージョン、OS、関係する Config の設定（Profile、Resources、CIMD など）
