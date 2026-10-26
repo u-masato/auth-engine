@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # go.work で束ねた各モジュール。リポジトリ内のモジュール同士は replace で解決するので更新の対象から外す
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/adapters/sqlite"
+      - "/adapters/postgres"
+      - "/examples/standalone"
+      - "/tests"
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Tokyo
+    ignore:
+      - dependency-name: "github.com/u-masato/auth-engine*"
+    # 依存の更新を週 1 本の PR にまとめる。セキュリティ更新（有効にした場合）はまとめずに個別に出る
+    groups:
+      go-modules:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Tokyo
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"

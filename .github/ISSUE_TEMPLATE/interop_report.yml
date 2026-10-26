@@ -1,0 +1,50 @@
+name: 相互運用の報告
+description: 実在するクライアント・Resource Server・MCP クライアントと組み合わせた結果
+labels: ["interop"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        通った報告も歓迎します。動作確認済みの組み合わせとして文書に載せます（[docs/mcp-interop.md](https://github.com/u-masato/auth-engine/blob/main/docs/mcp-interop.md) を参照）。
+        トークン、Client Secret、署名鍵などの秘密値は伏せてください。
+  - type: input
+    id: peer
+    attributes:
+      label: 相手の製品とバージョン
+      description: 例 MCP Inspector 2.12.0、Claude Desktop、ChatGPT のコネクター、oauth2-proxy 7.x
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: 結果
+      options:
+        - 最後まで通った
+        - 途中で失敗した
+    validations:
+      required: true
+  - type: checkboxes
+    id: features
+    attributes:
+      label: 使った機能
+      options:
+        - label: Authorization Code + PKCE
+        - label: OpenID Connect（ID Token、UserInfo）
+        - label: Refresh Token
+        - label: client_credentials
+        - label: CIMD（URL の client_id）
+        - label: Resource Indicators（resource）
+        - label: JWT Access Token
+        - label: Introspection / Revocation
+  - type: input
+    id: version
+    attributes:
+      label: auth-engine のバージョン
+      description: コミットまたはタグ
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: 詳細
+      description: 失敗した場合は、どの要求でどのエラーになったか（error / error_description、HTTP ステータス、ログの event）

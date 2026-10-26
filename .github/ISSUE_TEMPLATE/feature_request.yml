@@ -1,0 +1,30 @@
+name: 機能・仕様対応の提案
+description: 新しい仕様への対応や機能の追加を提案する
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        設計の判断は ADR（[docs/adr/](https://github.com/u-masato/auth-engine/tree/main/docs/adr)）に残しています。PKCE なしの Code Grant、Implicit、Password Grant、Dynamic Client Registration、Custom Profile、コアへの外部依存の追加は、意図して提供していません（[CONTRIBUTING.md](https://github.com/u-masato/auth-engine/blob/main/CONTRIBUTING.md)）。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したいこと
+      description: どんな構成・利用者で、何ができなくて困っているか
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: 関係する仕様と節
+      description: 例 RFC 9449（DPoP）、RFC 8693 §2.1、FAPI 2.0 Security Profile §5.3.2
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案
+      description: 振る舞いの案。どの Client Profile・どのパッケージに関わるかがわかれば
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考えた代替案
+      description: 既存の機能や、組み込む側の実装で回避できないか
