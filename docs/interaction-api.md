@@ -99,7 +99,7 @@ Txn の内容を返す。画面を描くために必要な情報だけを含み�
 - **`request.redirect_uri` のホスト名を表示する（MUST）。** 認可後にブラウザが送られる先をユーザーに見せる。
 - **`redirect_uri` が `localhost` / loopback（`127.0.0.1`、`[::1]`）なら注意書きを出す（SHOULD）。** MCP クライアントの多くはローカルで動くため `http://localhost` を redirect URI に使い、エンジンもそれを許す。ただし別のローカルアプリが同じポートで待ち受けて Code を横取りする余地があるので、「このコンピュータ上のアプリケーションに戻ります」のような文言で、ユーザーが自分で起こした操作かを確認させる。
 
-`client.client_uri` と `client.logo_uri` は透過しているだけで、エンジンは到達性や内容を確認しない（`logo_uri` の事前取得は Interaction App の責務）。
+`client.client_uri` `client.logo_uri` `client.policy_uri` は透過しているだけで、エンジンは到達性や内容を確認しない（`logo_uri` の事前取得は Interaction App の責務）。CIMD 文書から解決した `mcp` の Client については、3 つとも http(s) の絶対 URL であることだけを確認し、`javascript:` や `data:` などを含む文書は Client ごと拒否する（2026-10-26 から。それ以前は `client_uri` だけを確認していた）。登録済み Client の値は登録した運用者の入力をそのまま返すので、画面に出すときは Interaction App 側でもエスケープし、リンクや画像の URL に使う前にスキームを確かめる。
 
 ## POST /transactions/{txn_id}/complete
 

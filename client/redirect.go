@@ -52,9 +52,10 @@ func (p redirectPolicy) ignoresLoopbackPort() bool {
 }
 
 // loopbackMatch は requested が、登録済みの http loopback URI とポート番号以外で一致するかを返す。
+// fragment は登録時と同じく空のもの（末尾の "#"）も拒否する（RFC 6749 §3.1.2）。
 func loopbackMatch(registered []string, requested string) bool {
 	req, err := url.Parse(requested)
-	if err != nil || req.Scheme != "http" || !isLoopbackIP(req.Hostname()) || req.Fragment != "" || req.User != nil {
+	if err != nil || req.Scheme != "http" || !isLoopbackIP(req.Hostname()) || strings.Contains(requested, "#") || req.User != nil {
 		return false
 	}
 	for _, r := range registered {

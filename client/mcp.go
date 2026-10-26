@@ -70,9 +70,14 @@ func ParseClientIDURL(id string) (*url.URL, error) {
 	case strings.Contains(id, "#"): // 空の fragment（末尾の "#"）も拒否する
 		return nil, fmt.Errorf("%w: fragment is not allowed", ErrNotMetadataURL)
 	}
-	for seg := range strings.SplitSeq(u.EscapedPath(), "/") {
-		if seg == "." || seg == ".." {
-			return nil, fmt.Errorf("%w: dot segments are not allowed", ErrNotMetadataURL)
+	// パーセントエンコードした "."（%2e）は "." と同じ（RFC 3986 §2.3、§6.2.2.2）。文書サーバーが復号して
+	// 別の path を返したり、path で判断する TrustPolicy をすり抜けたりしないよう、復号後の path も確かめる。
+	// 復号で %2F が "/" に変わり、エンコードした形では 1 セグメントだったものも拒否されるが、安全側に倒す。
+	for _, p := range []string{u.EscapedPath(), u.Path} {
+		for seg := range strings.SplitSeq(p, "/") {
+			if seg == "." || seg == ".." {
+				return nil, fmt.Errorf("%w: dot segments are not allowed", ErrNotMetadataURL)
+			}
 		}
 	}
 	return u, nil
@@ -109,9 +114,16 @@ func NewMCP(doc MetadataDocument, documentURL string, now time.Time) (*Client, e
 			return nil, fmt.Errorf("%w: response_type %q is not supported", ErrInvalid, rt)
 		}
 	}
-	if doc.ClientURI != "" {
-		if u, err := url.Parse(doc.ClientURI); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return nil, fmt.Errorf("%w: client_uri must be an absolute http(s) URL", ErrInvalid)
+	// 3 つの URL は Interaction App が同意画面にリンクや画像として出しうる。文書は第三者が書くので、
+	// javascript: や data: を同意画面に持ち込ませないよう http(s) の絶対 URL に限る（RFC 7591 §5）。
+	for _, f := range []struct{ name, value string }{
+		{"client_uri", doc.ClientURI}, {"logo_uri", doc.LogoURI}, {"policy_uri", doc.PolicyURI},
+	} {
+		if f.value == "" {
+			continue
+		}
+		if u, err := url.Parse(f.value); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return nil, fmt.Errorf("%w: %s must be an absolute http(s) URL", ErrInvalid, f.name)
 		}
 	}
 
