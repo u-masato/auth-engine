@@ -124,6 +124,8 @@ func TestResolveRedirectURINativeLoopback(t *testing.T) {
 		"http://127.0.0.2/cb",           // 別の loopback アドレス（登録と異なるホスト）
 		"com.example.app:/cb2",
 		"http://user@127.0.0.1/cb",
+		"http://127.0.0.1:51004/cb#x", // fragment（RFC 6749 §3.1.2）
+		"http://127.0.0.1:51004/cb#",  // 空の fragment も登録時と同じく拒否する
 	}
 	for _, u := range bad {
 		if _, err := c.ResolveRedirectURI(u); !errors.Is(err, ErrRedirectURIMismatch) {
