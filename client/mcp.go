@@ -114,9 +114,16 @@ func NewMCP(doc MetadataDocument, documentURL string, now time.Time) (*Client, e
 			return nil, fmt.Errorf("%w: response_type %q is not supported", ErrInvalid, rt)
 		}
 	}
-	if doc.ClientURI != "" {
-		if u, err := url.Parse(doc.ClientURI); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return nil, fmt.Errorf("%w: client_uri must be an absolute http(s) URL", ErrInvalid)
+	// 3 つの URL は Interaction App が同意画面にリンクや画像として出しうる。文書は第三者が書くので、
+	// javascript: や data: を同意画面に持ち込ませないよう http(s) の絶対 URL に限る（RFC 7591 §5）。
+	for _, f := range []struct{ name, value string }{
+		{"client_uri", doc.ClientURI}, {"logo_uri", doc.LogoURI}, {"policy_uri", doc.PolicyURI},
+	} {
+		if f.value == "" {
+			continue
+		}
+		if u, err := url.Parse(f.value); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return nil, fmt.Errorf("%w: %s must be an absolute http(s) URL", ErrInvalid, f.name)
 		}
 	}
 

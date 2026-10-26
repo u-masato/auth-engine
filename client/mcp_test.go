@@ -132,6 +132,11 @@ func TestNewMCPRejects(t *testing.T) {
 		{"response_types token", func(d *MetadataDocument) { d.ResponseTypes = []string{"code", "token"} }, docURL},
 		{"malformed scope token", func(d *MetadataDocument) { d.Scope = `files:read "quoted"` }, docURL},
 		{"client_uri relative", func(d *MetadataDocument) { d.ClientURI = "mcp-client.example" }, docURL},
+		{"client_uri javascript", func(d *MetadataDocument) { d.ClientURI = "javascript:alert(1)" }, docURL},
+		{"logo_uri data", func(d *MetadataDocument) { d.LogoURI = "data:image/svg+xml,<svg onload=alert(1)>" }, docURL},
+		{"logo_uri relative", func(d *MetadataDocument) { d.LogoURI = "/logo.png" }, docURL},
+		{"policy_uri javascript", func(d *MetadataDocument) { d.PolicyURI = "javascript:alert(1)" }, docURL},
+		{"policy_uri without host", func(d *MetadataDocument) { d.PolicyURI = "https:///policy" }, docURL},
 		{"client_id too long", func(d *MetadataDocument) {
 			d.ClientID = "https://mcp-client.example/" + strings.Repeat("a", 240)
 		}, "https://mcp-client.example/" + strings.Repeat("a", 240)},
