@@ -1,6 +1,6 @@
 # ロードマップと M1 の実装順序
 
-- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（Conformance Suite は実行したが、PKCE 必須のため Basic OP の大半は評価不能。[conformance.md](conformance.md)）。**M3 は 2026-10-25 に完了**（MCP Inspector との相互運用は手動実行。[mcp-interop.md](mcp-interop.md)）
+- 状態: 採用（2026-10-24 合意）。**M1・M2 は 2026-10-24 に完了**（Conformance Suite は実行したが、PKCE 必須のため Basic OP の大半は評価不能。[conformance.md](conformance.md)）。**M3 は 2026-10-25 に完了**（MCP Inspector との相互運用は手動実行。[mcp-interop.md](mcp-interop.md)）。**M4 は M4a / M4b に分け、M4a の分解は草案**（2026-10-25。末尾の「M4a のタスク順序（案）」）
 - 日付: 2026-10-24
 
 準拠仕様の段階（P0〜P3）は [準拠仕様一覧](specifications.md) に従う。ここでは P0 を 2 つのマイルストーンに分け、M1 のタスク順序を決める。
@@ -12,7 +12,8 @@
 | **M1** | Go ライブラリとして、SQLite だけで Authorization Code + PKCE を完走 | Web / Native Profile、Txn と Interaction API（ADR-0003）、Code 発行・交換、Opaque Access Token、SQLite Adapter、E2E テスト、最小の Discovery（RFC 8414） |
 | **M2** | OIDC 対応と運用に必要なトークンライフサイクル | ID Token、`/jwks`、`/userinfo`、OIDC Discovery、Refresh Token Rotation、Revocation、Introspection、M2M Profile（client_credentials）、PostgreSQL Adapter、Conformance Suite（Basic OP） |
 | **M3**（P1） | MCP 連携 | Resource Indicators、MCP Client Profile（CIMD）、JWT Access Token（任意）、Protected Resource Metadata 用ミドルウェア |
-| M4（P2） | 高度な拡張 | Token Exchange、DPoP、PAR、private_key_jwt、RAR |
+| M4a（P2、案） | クライアント認証と送信者拘束。FAPI 2.0 Security Profile を Conformance Suite で回せる | Web Legacy Profile（ADR-0009）、`private_key_jwt`（`jwks` / `jwks_uri`）、PAR、DPoP、FAPI Profile（[ADR-0010](adr/0010-client-auth-and-sender-constraint.md)） |
+| M4b（P2、案） | エージェント間の委譲と細かい権限の表現 | Token Exchange、RAR（ADR-0011 で決める） |
 
 技術スタック案の Phase 1〜4 との差分:
 
@@ -200,3 +201,53 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
 マイルストーンのタスクに属さない修正のうち、外から見える挙動が変わるものを記録する。
 
 - **HTTP 応答の形の変更（[#20](https://github.com/u-masato/auth-engine/issues/20)、2026-10-25）**: `/revoke` `/introspect` `/jwks` の内部障害（500）の本文を、`ErrorRenderer` が描く HTML のエラーページから、`/token` `/userinfo` と同じ JSON（`{"error":"server_error","error_description":"internal error"}`、`Content-Type: application/json`）に変えた。ステータスコード（500）と、プロトコルエラー（4xx）の形は変わらない。これらの呼び出し元は Client や Resource Server で、HTML のページは解釈できないため。[Interaction API](interaction-api.md) の契約の対象外だが、500 の本文を見ていた利用者には非互換になる。あわせて、`*token.Error` ならプロトコルエラー、それ以外は 500 とする振り分けを `/token` `/revoke` `/introspect` で `writeTokenFailure` に共通化した。
+
+## M4a のタスク順序（案）
+
+- 状態: **草案**（2026-10-25）。着手前に合意する設計判断は [ADR-0010](adr/0010-client-auth-and-sender-constraint.md) に書き起こした。合意後にこの節と ADR-0010 の状態を「採用」にする。
+
+到達点: confidential クライアントが `private_key_jwt` で認証し、PAR で認可要求を提出し、DPoP で拘束された Access Token / Refresh Token を得る。FAPI 2.0 Security Profile（final）の AS 要件を Profile `fapi` で満たし、OpenID Conformance Suite の FAPI 2.0 Security Profile プラン（`private_key_jwt` + DPoP の variant）を回して結果を [conformance.md](conformance.md) に記録する。M2 で見送った「適合性を示す手段」をここで作る。
+
+### 着手前に合意する設計判断（[ADR-0010](adr/0010-client-auth-and-sender-constraint.md)）
+
+論点 1〜4 を 2026-10-25 に議論し、次の形で書き起こした。詳細と既存 ADR への影響は ADR-0010 を参照。
+
+1. **認証方式は Profile が許す集合の中から、登録時の資格情報で決める**（ADR-0010 §1）。Client に方式のフィールドは置かず、`SecretHash` / `JWKS` / `JWKSURI` のどれか 1 つだけを持つ。Web / Web Legacy / Machine はシークレットか `private_key_jwt`、Native は `none`、MCP は `none` か `private_key_jwt`（CIMD 文書で決まる）、FAPI は `private_key_jwt` のみ。ADR-0004 §3 の「Profile が決める」は「許す集合を Profile が決める」に読み替え、個別フラグは増やさない。
+2. **クライアントアサーションの検証**（§2）。`aud` は発行者識別子のみ、`iat` から `exp` までは既定 5 分、未来方向の許容 10 秒、`jti` 必須、`alg` は PS256 / ES256 / RS256（FAPI は RS256 を拒否）、失敗は理由を区別せず `invalid_client`。
+3. **認証ロジックは `clientauth` パッケージ**（§3）。トークンエンドポイントと PAR が共用する。
+4. **鍵は `jwks` と `jwks_uri` の両方**（§4）。併記は拒否。取得器は `resourceserver` の JWKS キャッシュを `keys` に移して共用し、SSRF 対策の Transport は `internal/safehttp` に移して `cimd` と共用する。キャッシュの単位は URL。CIMD Client の `jwks_uri` には同一 origin を求めず、文書と同じ `TrustPolicy` を適用する。
+5. **`jti` のリプレイ記録は Store Port の 1 メソッド `RecordJTI`**（§5）。用途・発行者・`jti` の組の SHA-256 を期限付きで記録し、重複は `ErrAlreadyExists`。`clientauth.Store` と `dpop.Store` が同じシグネチャで宣言し、Adapter の実装は 1 つ（`replay_ids` 表）。掃除は `Purge`。Resource Server 側は差し替え可能なプロセス内キャッシュ。
+6. **DPoP は Proof が提示されたら拘束する**（§6）。`Family.JKT`（public Client の Refresh Token）と `AccessToken.JKT`、`dpop_jkt` による認可コードの拘束（PAR の `DPoP` ヘッダも受ける）、`token_type: DPoP`、JWT の `cnf.jkt`、Introspection の `jkt`。nonce は `Config.DPoP.NonceSecret` を設定したときだけ要求する（ステートレスな HMAC）。Proof の `iat` は過去 5 分・未来 10 秒。
+7. **FAPI 2.0 の要件は Profile `fapi` として束ねる**（§7）。confidential、`private_key_jwt` のみ（PS256 / ES256）、PAR 必須、DPoP 必須、Refresh Token は **Rotation しない**、認可コード寿命 60 秒以内、redirect URI は `https` のみ。他 Profile の挙動は変えない。resource 単位の必須化や Client のフラグは採らない。
+8. **PAR は ADR-0003 の「Txn を `/authorize` より前に作る」形**（§8）。`request_uri` は 256 bit 乱数のハッシュ保存、寿命 60 秒、1 回だけ消費。confidential は `clientauth` で認証。`fapi` では `request_uri` のない認可要求を拒否。
+
+### タスク
+
+依存関係の順に並べる。1 は独立した小タスク、2〜5 がクライアント認証、6 が PAR、7〜8 が DPoP、9 が FAPI Profile、10〜11 が結合と文書。
+
+| # | タスク | 内容 | 完了条件 |
+| --- | --- | --- | --- |
+| 1 | Web Legacy Profile | [ADR-0009](adr/0009-web-legacy-profile.md) の実装。`ProfileWebLegacy`、`pkcePolicy` の三値、認可要求の `openid` + `nonce` 判定、トークン要求の Downgrade 検知、`storagetest` に challenge 空の Code、`conformance/clients.json` を `web-legacy` に、`expected-failures.json` に `oidcc-ensure-request-without-nonce-succeeds-for-code-flow`。Basic OP プランを再実行して conformance.md に記録 | ADR-0009 §2〜§3 の全分岐のテスト、既存 Profile の回帰、Basic OP の評価対象が 5 → 30 前後に増えること |
+| 2 | `keys` の拡張と取得器 | PS256 の生成と検証（FAPI 2.0 §5.4.1）、JWK Thumbprint（RFC 7638）の公開、`resourceserver/jwt.go` の JWKS キャッシュを `keys.RemoteSet`（仮）に移設（`Cache-Control` 尊重、未知 `kid` の再取得と間引き、失敗時は手元の鍵）。`cimd.NewTransport` と接続先検査を `internal/safehttp` に移し、`cimd.NewTransport` は委譲で残す | `resourceserver` と `cimd` の既存テストが変わらないこと、PS256 で署名した JWT の往復 |
+| 3 | `client` の資格情報と `private_key_jwt` の受理 | `Client.JWKS` / `JWKSURI`、`WebParams` / `MachineParams` の `JWKS` / `JWKSURI`（`Secret` との排他、併記の拒否、構築時の鍵検証）、Profile 規則表の `authMethods` に `private_key_jwt`、`AcceptsAuthMethod` を「集合 ∧ 資格情報」に。CIMD 文書の `token_endpoint_auth_method=private_key_jwt` と `jwks` / `jwks_uri` の受理（CIMD §4.1。`client_secret_post` は拒否のまま）。Store: clients の列追加（memory / SQLite / PostgreSQL の次の番号）と `storagetest` | 鍵を持つ Client の往復、シークレットと鍵の同時指定がエラー、CIMD 文書の 3 通り（`none` / 鍵あり / 共有シークレット）の判定、`profile_test.go` の表の更新 |
+| 4 | `clientauth` パッケージとアサーション検証 | `token/clientauth.go` を `clientauth` に移設。`client_assertion` の検証（ADR-0010 §2）。`clientauth.Store.RecordJTI` と `replay_ids` 表（memory / SQLite / PostgreSQL、`Purge` に追加、`storagetest` の 4 ケース）。HTTP 層の `client_assertion` の取り出しと複数方式の併用拒否。Discovery の `token_endpoint_auth_methods_supported` と `token_endpoint_auth_signing_alg_values_supported` | インラインの `jwks` で `authorization_code` / `refresh_token` / `client_credentials` が通る、`aud` がエンドポイント URL だと `invalid_client`、同じ `jti` の 2 回目が `invalid_client`、同時 2 件で 1 件だけ成功（`-count=3`）、既存のシークレット認証の回帰 |
+| 5 | `jwks_uri` の取得 | `clientauth` の URL 単位の取得器キャッシュ（件数上限、期限）、`internal/safehttp` の Transport、サイズ上限 64 KB、CIMD Client の `jwks_uri` に `TrustPolicy` を適用、`Engine.Config` の設定項目（`cimd.Config` と揃える） | 鍵の回転（`kid` 追加）が再取得で効く、特殊用途アドレスの拒否、取得不能時に手元の鍵で続く・手元になければ `invalid_client`、`TrustPolicy` 外の `jwks_uri` の拒否 |
+| 6 | PAR（RFC 9126） | `POST /par`、`request_uri`（256 bit 乱数、ハッシュ保存、60 秒、CAS で 1 回消費）、Txn を `/authorize` より前に作る、confidential の `clientauth` 認証、`/authorize` の `request_uri` 解釈（`client_id` 以外のパラメータは無視）、Discovery の `pushed_authorization_request_endpoint`。`dpop_jkt` と `DPoP` ヘッダの受理はタスク 7 | PAR → `/authorize` → Code 交換の完走、`request_uri` の再利用と期限切れの拒否、認証のない confidential の PAR が `invalid_client`、`/authorize` 側パラメータの無視 |
+| 7 | `dpop` パッケージとトークンエンドポイント | Proof の解析と検証（RFC 9449 §4.3）、Thumbprint、`Family.JKT` / `AccessToken.JKT` / `AuthorizationCode.DPoPJKT`（列追加と `storagetest`）、`dpop_jkt`（認可要求と PAR、`DPoP` ヘッダとの一致）、Code 交換と Refresh での鍵の照合、`token_type: DPoP`、JWT の `cnf.jkt`、Introspection の `jkt` と `token_type`、`dpop.Store.RecordJTI`、nonce（`Config.DPoP.NonceSecret`、`use_dpop_nonce`、`DPoP-Nonce`）、Discovery の `dpop_signing_alg_values_supported`、CIMD の `dpop_bound_access_tokens` | Proof ありで拘束されたトークンが出る、別鍵の Refresh が拒否される、`dpop_jkt` 不一致の Code 交換が `invalid_grant`、`htm` / `htu` / `iat` / `jti` の各違反、nonce の要求と再試行、Proof なしは従来どおり Bearer |
+| 8 | `resourceserver` の DPoP | `Authorization: DPoP` と `DPoP` ヘッダの受理、`ath` と `jkt` の照合（Introspection の `jkt` / JWT の `cnf.jkt`）、拘束トークンの Bearer 提示の拒否（§7.1）、`WWW-Authenticate: DPoP algs="..."`、`jti` の差し替え可能なキャッシュ、任意の nonce（§9、既定無効） | 正しい Proof で 200、鍵違い・`ath` 違い・Bearer 提示で 401、Bearer トークンは従来どおり |
+| 9 | FAPI Profile | `ProfileFAPI` と `NewFAPI`、規則表の `requirePAR` `requireDPoP` `rotateRefreshToken` `maxCodeTTL`、`RotateRefreshToken` の `next == nil`（Rotation なし。3 Adapter と `storagetest`）、PAR なし・Proof なしの拒否、RS256 のアサーション拒否、認可コード寿命の上限、ID Token の既定 ES256 | FAPI 2.0 §5.3.2 の各要件のテスト、Rotation なしで Refresh が繰り返せる、他 Profile の回帰 |
+| 10 | `examples`・E2E・Conformance | `cmd/server` と `console` に `fapi` と「シークレット / 鍵」の選択、`oauthclient` に `private_key_jwt` / PAR / DPoP。`tests/` の E2E（`private_key_jwt` + PAR + DPoP の完走、`fapi` の Rotation なし、CIMD Client の `private_key_jwt`）。Conformance Suite の FAPI 2.0 Security Profile プランを実行し、構成と結果を conformance.md に記録 | E2E 通過、FAPI 2.0 プランの結果が記録されていること（不合格があれば理由と対応方針） |
+| 11 | 文書 | ADR-0010 の状態更新と実装結果、ADR-0004 / 0005 / 0006 / 0007 / 0008 / 0009 への追記（ADR-0010「既存 ADR への影響」）、CLAUDE.md の不変条件（Rotation の例外）、`docs/interaction-api.md`（`profile` に `fapi`）、`docs/embedding.md`（鍵の登録、DPoP nonce の設定、`fapi` の使い方）、`docs/specifications.md` の P2 の状態、README、各パッケージ `doc.go` | — |
+
+タスク 1 と 2 は独立で並行できる。3 は 2 の後（鍵の検証に `keys` を使う）。4 は 3 の後、5 は 4 の後。6 は 4 の後（`clientauth` を使う）で 5 と並行できる。7 は 4 と 6 の後。8 は 7 の後。9 は 6〜8 の後。10〜11 は 9 の後。
+
+### M4a で明示的に先送りするもの
+
+- Token Exchange（RFC 8693）と RAR（RFC 9396）。M4b（ADR-0011）
+- mTLS（RFC 8705）。FAPI 2.0 は DPoP か mTLS のどちらかでよく、コアに TLS の扱いを持ち込まない
+- resource 単位の送信者拘束の必須化（`Config.Resources`）。Profile `fapi` で足りる。要望が出た時点で足す
+- Resource Server 側の DPoP nonce の既定有効化。`resourceserver` に任意機能として置くだけにする
+- `request_uri` を Client が自前でホストする JAR（RFC 9101）。PAR の `request_uri` のみ受ける
+- FAPI 2.0 Message Signing（JAR / JARM）。P3
+- EdDSA（FAPI 2.0 §5.4.1 が許す 3 つ目の方式）。PS256 / ES256 で足りる
+- Rotation しない Refresh Token の失効伝播以外の運用機能（寿命の延長など）。Family の寿命まで使う単純な形にとどめる
