@@ -48,8 +48,20 @@ type Store interface {
 	//   - 保存済みの Profile と c.Profile が違う: storage.ErrStateConflict。Profile は登録後に
 	//     変更できない（ADR-0004 §4）。照合と更新は 1 つの操作で行い、何も変更しない。
 	//
-	// ID・Profile・CreatedAt は書き換えない（CreatedAt は保存済みの値が残る）。
+	// ID・Profile・CreatedAt・SecretHash は書き換えない（保存済みの値が残る）。シークレットを
+	// 書き換えるのは RotateClientSecret だけである。UpdateClient が c.SecretHash を書くと、
+	// 再発行より前に読んだ Client を保存したときに、無効にしたはずの旧シークレットが戻ってしまう。
 	UpdateClient(ctx context.Context, c *Client) error
+
+	// RotateClientSecret は id の Client のシークレットのハッシュを secretHash に置き換える。
+	// secretHash は Client.RotateSecret が作る。置き換えた時点で旧シークレットは使えなくなる。
+	//
+	//   - 存在しない: storage.ErrNotFound。
+	//   - 保存済みの Client がシークレットを持たない（public）、または secretHash が空:
+	//     storage.ErrStateConflict。照合と更新は 1 つの操作で行い、何も変更しない。
+	//
+	// シークレット以外の項目、発行済みのトークン、Grant には触れない。
+	RotateClientSecret(ctx context.Context, id, secretHash string) error
 
 	// DeleteClient は Client を削除し、同じ操作で次のものを無効にする。
 	//

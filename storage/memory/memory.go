@@ -121,8 +121,22 @@ func (s *Store) UpdateClient(_ context.Context, c *client.Client) error {
 		return storage.ErrStateConflict
 	}
 	next := clone(c)
-	next.CreatedAt = cur.CreatedAt
+	next.CreatedAt, next.SecretHash = cur.CreatedAt, cur.SecretHash
 	s.clients[c.ID] = next
+	return nil
+}
+
+func (s *Store) RotateClientSecret(_ context.Context, id, secretHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.clients[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if cur.SecretHash == "" || secretHash == "" {
+		return storage.ErrStateConflict
+	}
+	cur.SecretHash = secretHash
 	return nil
 }
 

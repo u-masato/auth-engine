@@ -1,7 +1,7 @@
 # ADR-0004: Client Profile
 
-- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で MCP Client Profile を追加（[ADR-0008](0008-mcp-integration.md) §4）。2026-10-25 更新: PKCE を任意にする Web Legacy Profile を追加（[ADR-0009](0009-web-legacy-profile.md)、未実装）
-- 日付: 2026-10-24（2026-10-25 更新）
+- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で MCP Client Profile を追加（[ADR-0008](0008-mcp-integration.md) §4）。2026-10-25 更新: PKCE を任意にする Web Legacy Profile を追加（[ADR-0009](0009-web-legacy-profile.md)、未実装）。2026-11-11 追記: シークレットの再発行（§8）。この追記は**草案**で、実装とともに PR に出しており、マージで確定する
+- 日付: 2026-10-24（2026-11-11 更新）
 
 ## 文脈
 
@@ -35,7 +35,7 @@ P0 は Web / Native / Machine の 3 つ。MCP Client は M3 で追加した（§
 - `client_id`（未指定なら生成）、表示名、ロゴ URL、ポリシー URL
 - `redirect_uris`（Profile の照合規則の範囲内）
 - `allowed_scopes`（Client が要求できる scope の上限）
-- `client_secret`（confidential のみ。エンジンが生成して 1 回だけ返す。保存はハッシュ）
+- `client_secret`（confidential のみ。エンジンが生成して 1 回だけ返す。保存はハッシュ）。登録後は再発行できる（2026-11-11 追加。草案）。`Client.RotateSecret` が新しい値を生成し、`Store.RotateClientSecret` がハッシュだけを置き換える。保存した時点で旧シークレットは無効になり、新旧を併用する期間は置かない（§8）。発行済みのトークンと Grant には触れない
 - トークン有効期間（Profile ごとの上限内で短縮のみ可。例: Access Token 既定 1 時間、上限 24 時間）
 - ID Token 署名アルゴリズム（RS256 / ES256）
 - 許可する `resource`（`Resources`。M3 で追加。空なら `Config.Resources` に設定済みの全 resource を要求でき、指定があればその範囲に限る。ADR-0008 §2）
@@ -84,7 +84,18 @@ Conformance Suite の Basic OP プランは PKCE なしの認可要求を前提�
 - 条件表の PKCE は真偽値ではなく三値（該当なし / 必須 / 提示されたら検証）で持つ。`Client.RequiresPKCE()` は「必須か」の意味のまま残す。
 - Engine 側に有効化の設定は置かない。新しく作るクライアントは Web を使う。
 
+### 8. シークレットの再発行（2026-11-11 追加。草案）
+
+状態は草案で、実装とともに PR に出している。マージで確定する。
+
+confidential クライアント（Web / Machine）のシークレットは、登録後に再発行できる。これまでは手段がなく、漏えいしたら Client を作り直すしかなかった。作り直すと Grant がすべて失効し、ユーザーは同意をやり直すことになる。
+
+- **形。** `Client.RotateSecret()` が新しいシークレット（256 bit 乱数）を生成し、ハッシュを差し替えた Client と平文を返す。保存は `Store.RotateClientSecret(ctx, id, secretHash)` で行う。値の指定は受け付けない（登録時の `WebParams.Secret` は既存システムからの移行のためのもので、再発行には要らない）。public クライアントでは `client.ErrInvalid`。
+- **即時に切り替える。** 保存した時点で旧シークレットは使えなくなり、新旧を併用する期間は置かない。Client 側の設定を差し替えるまで、トークンエンドポイントへの要求は `invalid_client` になる（発行済みの Access Token はそのまま使える）。併用期間を持つ形（旧ハッシュと期限を別に保存する）も検討したが、採らなかった。漏えいへの対応では旧シークレットを直ちに止めるのが正しく、併用は「無停止で定期交換したい」場合のための機能である。それには列の追加と、認証のたびに期限を見る分岐が要る。無停止の交換は、M4a の `private_key_jwt`（ADR-0010。鍵を複数登録できる）で、共有シークレットより素直に実現できる。
+- **Store の専用メソッドにする。** `UpdateClient` は読んでから書く使い方（`GetClient` → `Client.Update` → `UpdateClient`）なので、`UpdateClient` がシークレットのハッシュも書くと、再発行より前に読んだ Client の保存で旧シークレットが戻る。無効にしたはずの値が黙って有効に戻るのは、他の項目の「後から保存した方が勝つ」とは重さが違う。そこでシークレットの書き込みを `RotateClientSecret` だけにし、`UpdateClient` はシークレットに触れないようにした（ADR-0005 §2）。
+- **トークンと Grant には触れない。** 再発行は Client 認証の資格情報の交換であり、ユーザーの同意とは別のものである。攻撃者が Refresh Token も得ているおそれがあるなら、運用者が Grant を失効させる（`grant.Service.Revoke`。対象は `grant.Service.ListByClient` で一覧できる）。
+
 ## 影響
 
-- Client の登録はまず Go API のみ（`Store.CreateClient`）。登録用 HTTP API・CLI は `examples/` に置き、コアには含めない。2026-10-25 に更新（`Client.Update` → `Store.UpdateClient`）と削除（`Store.DeleteClient`）を追加した。`Client.Update` は §2 の開放項目だけを受け取り、`Store.UpdateClient` は保存済みの Profile と違う値を `storage.ErrStateConflict` で拒否する（§4）。
+- Client の登録はまず Go API のみ（`Store.CreateClient`）。登録用 HTTP API・CLI は `examples/` に置き、コアには含めない。2026-11-11 に、運用者向けの管理 API の例として `examples/standalone/adminapi`（Bearer 認証付きの JSON API。Client の一覧・登録・更新・削除、シークレットの再発行、Client ごとの Grant の一覧と失効）を置いた。コアに HTTP の管理 API を入れない方針は変えていない。2026-10-25 に更新（`Client.Update` → `Store.UpdateClient`）と削除（`Store.DeleteClient`）を追加した。`Client.Update` は §2 の開放項目だけを受け取り、`Store.UpdateClient` は保存済みの Profile と違う値を `storage.ErrStateConflict` で拒否する（§4）。
 - Profile の条件表は `client/profile.go` にテーブルとして持ち、テストで表と実装の一致を検証する。MCP Client の列も同じテーブルにある。Web Legacy の列も同じテーブルに足す（ADR-0009 §4）。

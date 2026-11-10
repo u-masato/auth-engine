@@ -21,6 +21,7 @@
 // 事前登録なしの Client を cimd.Resolver が解決する。
 //
 // 永続化の規約（docs/adr/0007-package-layout.md §2）: Client はフィールドを公開した
-// 構造体だが、構築は NewWeb / NewNative / NewMachine / NewMCP のみで行い、登録後の変更は Update で行う。
+// 構造体だが、構築は NewWeb / NewNative / NewMachine / NewMCP のみで行い、登録後の変更は Update、
+// シークレットの再発行は RotateSecret で行う（docs/adr/0004-client-profiles.md §8）。
 // Adapter から復元した値は Validate で再検証する。
 package client
