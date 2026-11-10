@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,8 @@ import (
 // Resource Server 自身を認可サーバーに Machine Profile の Client として登録し、その資格情報で
 // client_secret_basic 認証する（ADR-0006 §1）。Opaque Access Token はこの方式でしか検証できない。
 // JWT Access Token もこの方式で検証でき、失効が即時に反映される。
+//
+// 並行に Verify してよい。内部に同期用の状態を持つので、使い始めた後に値としてコピーしないこと。
 type IntrospectionVerifier struct {
 	// Issuer は認可サーバーの issuer。Endpoint が空ならメタデータ（RFC 8414）から introspection_endpoint を得る。
 	Issuer string
@@ -28,7 +31,8 @@ type IntrospectionVerifier struct {
 	// HTTPClient は nil なら 10 秒タイムアウトの既定。
 	HTTPClient *http.Client
 
-	as *asClient
+	asOnce sync.Once // as を 1 回だけ作る（並行な Verify でメタデータを重複取得しない）
+	as     *asClient
 }
 
 var _ TokenVerifier = (*IntrospectionVerifier)(nil)
@@ -109,9 +113,7 @@ func (v *IntrospectionVerifier) endpoint(ctx context.Context) (string, error) {
 	if v.Issuer == "" {
 		return "", errors.New("resourceserver: IntrospectionVerifier requires Issuer or Endpoint")
 	}
-	if v.as == nil {
-		v.as = newASClient(v.Issuer, httpClientOr(v.HTTPClient))
-	}
+	v.asOnce.Do(func() { v.as = newASClient(v.Issuer, httpClientOr(v.HTTPClient)) })
 	m, err := v.as.metadata(ctx)
 	if err != nil {
 		return "", err

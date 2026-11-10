@@ -194,3 +194,9 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
 - CIMD Client の永続化。M3 ではプロセス内キャッシュのみ。複数インスタンス構成でのキャッシュ共有は、必要になった時点で `cimd.Cache` の Store 実装を足す
 - Token Exchange（RFC 8693）による別 Audience への交換、DPoP（RFC 9449）によるトークン拘束（M4）
 - MCP Authorization Extensions（ext-auth リポジトリ）。コア仕様の範囲に留める
+
+## M3 完了後の修正
+
+マイルストーンのタスクに属さない修正のうち、外から見える挙動が変わるものを記録する。
+
+- **HTTP 応答の形の変更（[#20](https://github.com/u-masato/auth-engine/issues/20)、2026-10-25）**: `/revoke` `/introspect` `/jwks` の内部障害（500）の本文を、`ErrorRenderer` が描く HTML のエラーページから、`/token` `/userinfo` と同じ JSON（`{"error":"server_error","error_description":"internal error"}`、`Content-Type: application/json`）に変えた。ステータスコード（500）と、プロトコルエラー（4xx）の形は変わらない。これらの呼び出し元は Client や Resource Server で、HTML のページは解釈できないため。[Interaction API](interaction-api.md) の契約の対象外だが、500 の本文を見ていた利用者には非互換になる。あわせて、`*token.Error` ならプロトコルエラー、それ以外は 500 とする振り分けを `/token` `/revoke` `/introspect` で `writeTokenFailure` に共通化した。

@@ -114,10 +114,14 @@ func (s *Service) Complete(ctx context.Context, txnID string, out Outcome) (stri
 	if len(out.GrantedScopes) == 0 {
 		return "", invalidOutcome("granted_scopes must not be empty; use Reject to deny")
 	}
-	granted := slices.Compact(slices.Clone(out.GrantedScopes))
-	for _, sc := range granted {
+	// 要求 scope の部分集合であることを確かめつつ、順序を保って重複を除く（隣り合わない重複も）。
+	var granted []string
+	for _, sc := range out.GrantedScopes {
 		if !slices.Contains(txn.Request.Scopes, sc) {
 			return "", invalidOutcome("granted scope %q was not requested", sc)
+		}
+		if !slices.Contains(granted, sc) {
+			granted = append(granted, sc)
 		}
 	}
 	if txn.Request.HasMaxAge && now.Sub(out.AuthenticatedAt) > txn.Request.MaxAge {

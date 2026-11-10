@@ -239,15 +239,15 @@ func TestCompleteValidation(t *testing.T) {
 			}
 		})
 	}
-	// 部分集合なら OK（重複は除去）
+	// 部分集合なら OK。重複は順序を保って除く（隣り合う重複も、隣り合わない重複も）
 	txn := f.begin(t)
 	out := okOutcome()
-	out.GrantedScopes = []string{"openid", "openid"}
+	out.GrantedScopes = []string{"openid", "openid", "profile", "openid"}
 	if _, err := f.svc.Complete(f.ctx, txn.ID, out); err != nil {
 		t.Fatal(err)
 	}
 	stored, _ := f.store.GetTransaction(f.ctx, txn.ID)
-	if !slices.Equal(stored.Outcome.GrantedScopes, []string{"openid"}) {
+	if !slices.Equal(stored.Outcome.GrantedScopes, []string{"openid", "profile"}) {
 		t.Fatalf("granted scopes: %v", stored.Outcome.GrantedScopes)
 	}
 }

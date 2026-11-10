@@ -92,8 +92,9 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 	}
 
 	// scope（RFC 6749 §3.3）。必須とし、Client の許可範囲内に限る。
-	scopes, bad := parseScopes(values.Get("scope"))
-	if bad != "" {
+	// 分解は client.ParseScope に一本化した: 連続した空白は /token と同じく拒否する。
+	scopes, scopeErr := client.ParseScope(values.Get("scope"))
+	if scopeErr != nil {
 		return fail(CodeInvalidScope, "malformed scope token")
 	}
 	if len(scopes) == 0 {
@@ -180,21 +181,4 @@ func parseRequest(ctx context.Context, clients client.Resolver, resources *resou
 // パッケージ接頭辞を落とすだけで、値（どの resource が拒否されたか）は Client に返す。
 func resourceErrorDescription(err error) string {
 	return strings.TrimPrefix(err.Error(), "resource: ")
-}
-
-// parseScopes は空白区切りの scope を分解し、重複を除いて返す。
-// 構文違反のトークンがあればそれを bad として返す。
-func parseScopes(raw string) (scopes []string, bad string) {
-	for _, s := range strings.Split(raw, " ") {
-		if s == "" {
-			continue
-		}
-		if !client.ValidScopeToken(s) {
-			return nil, s
-		}
-		if !slices.Contains(scopes, s) {
-			scopes = append(scopes, s)
-		}
-	}
-	return scopes, ""
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	authengine "github.com/u-masato/auth-engine"
 	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/grant"
 	"github.com/u-masato/auth-engine/httpapi"
 	"github.com/u-masato/auth-engine/internal/rand"
 	"github.com/u-masato/auth-engine/keys"
@@ -1024,6 +1026,38 @@ func TestRevocationAndIntrospection(t *testing.T) {
 		`"introspection_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"]`} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metadata missing %s: %s", want, rec.Body)
+		}
+	}
+}
+
+// lookupFailingStore は Token の参照だけを内部障害にする Store。
+type lookupFailingStore struct{ authengine.Store }
+
+var errLookupFailed = errors.New("store unavailable")
+
+func (lookupFailingStore) LookupAccessToken(context.Context, string) (*token.AccessToken, *grant.Grant, error) {
+	return nil, nil, errLookupFailed
+}
+
+func (lookupFailingStore) LookupRefreshToken(context.Context, string) (*token.RefreshToken, error) {
+	return nil, errLookupFailed
+}
+
+// /revoke と /introspect の呼び出し元は Client / Resource Server なので、内部障害も
+// HTML のエラーページではなく JSON の server_error で返す（/token と同じ形）。
+func TestRevocationAndIntrospectionInternalErrorIsJSON(t *testing.T) {
+	e := newEnvWith(t, func(cfg *authengine.Config) { cfg.Store = lookupFailingStore{cfg.Store} })
+	for _, path := range []string{"/revoke", "/introspect"} {
+		form := url.Values{"token": {"anything"}}
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetBasicAuth("web", e.webSecret)
+		rec := e.do(e.public, req)
+		var body map[string]any
+		if rec.Code != http.StatusInternalServerError ||
+			!strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") ||
+			json.Unmarshal(rec.Body.Bytes(), &body) != nil || body["error"] != "server_error" {
+			t.Fatalf("%s: %d %v %s", path, rec.Code, rec.Header(), rec.Body)
 		}
 	}
 }

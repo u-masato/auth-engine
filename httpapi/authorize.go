@@ -83,6 +83,8 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, location)
 }
 
+// internalError はブラウザ向けのエンドポイント（/authorize と Resume）の内部障害を記録し、
+// ErrorRenderer で 500 のエラーページを返す。JSON を返すエンドポイントは jsonInternalError を使う。
 func (s *Server) internalError(w http.ResponseWriter, r *http.Request, err error) {
 	s.logger.ErrorContext(r.Context(), "internal error", "event", "http.internal_error", "path", r.URL.Path, "error", err)
 	s.render.RenderError(w, r, http.StatusInternalServerError, authorization.CodeServerError, "internal error")
