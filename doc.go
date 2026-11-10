@@ -1,7 +1,7 @@
 // Package authengine は、ヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー
 // 「Protocol Engine」のルートパッケージである。
 //
-// エンジンはプロトコル処理（/authorize, /token, /userinfo, /jwks, Discovery）と
+// エンジンはプロトコル処理（/authorize, /token, /revoke, /introspect, /userinfo, /jwks, Discovery）と
 // Authorization Transaction・Grant・トークンの状態管理だけを担う。
 // ログイン・同意 UI とユーザー管理は外部の Interaction App の責務である
 // （docs/adr/0003-interaction-contract.md）。
@@ -18,6 +18,7 @@
 //     storage/memory はテスト専用。
 //   - Keys: 署名鍵セット（keys パッケージ）。RS256 の署名鍵を含め、再起動後も同じ鍵を使えるよう保存する。
 //   - Client の登録: client.NewWeb / NewNative / NewMachine で作り、Store.CreateClient で登録する。
+//     変更は Client.Update と Store.UpdateClient、一覧は Store.ListClients、削除は Store.DeleteClient。
 //   - Interaction App: ログイン・同意画面。docs/interaction-api.md の契約に従って実装する。
 //
 // MCP 連携（docs/adr/0008-mcp-integration.md）を使うときは、さらに Config.Resources に

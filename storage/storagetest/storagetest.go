@@ -35,6 +35,7 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		fn   func(t *testing.T, s authengine.Store)
 	}{
 		{"Client", testClient},
+		{"ClientList", testClientList},
 		{"ClientUpdate", testClientUpdate},
 		{"ClientDeleteCascades", testClientDeleteCascades},
 		{"ClientDeleteVersusIssue", testClientDeleteVersusIssue},
@@ -48,6 +49,7 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		{"RotateRefreshToken", testRotateRefreshToken},
 		{"RotateConcurrent", testRotateConcurrent},
 		{"RevokeGrantVersusIssue", testRevokeGrantVersusIssue},
+		{"RotateVersusRevoke", testRotateVersusRevoke},
 		{"RevokeTokenFamily", testRevokeTokenFamily},
 		{"RevokeAccessToken", testRevokeAccessToken},
 		{"Purge", testPurge},
@@ -218,6 +220,81 @@ func testClient(t *testing.T, s authengine.Store) {
 	}
 	if err := gotMCP.Validate(); err != nil {
 		t.Fatalf("restored mcp client must validate: %v", err)
+	}
+}
+
+// testClientList は ListClients の順序（ID のバイト列としての昇順）、キーセットページング、
+// 削除後の一覧を確かめる。大文字と小文字、記号を混ぜるのは、ロケール依存の照合順序を使う
+// データベースでも同じ順序になることを確かめるため。
+func testClientList(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	ids := func(cs []*client.Client) []string {
+		out := make([]string, 0, len(cs))
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return out
+	}
+	list := func(after string, limit int) []string {
+		t.Helper()
+		cs, err := s.ListClients(ctx, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cs == nil {
+			t.Fatal("ListClients must return an empty slice, not nil")
+		}
+		return ids(cs)
+	}
+	if got := list("", 10); len(got) != 0 {
+		t.Fatalf("empty store: %v", got)
+	}
+
+	// 登録順は ID の順と変える。バイト列の昇順は "B" < "_x" < "a" < "b" < "c-1"。
+	for _, id := range []string{"b", "_x", "c-1", "B", "a"} {
+		if err := s.CreateClient(ctx, newWebClient(t, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"B", "_x", "a", "b", "c-1"}
+	if got := list("", 10); !slices.Equal(got, want) {
+		t.Fatalf("order: got %v, want %v", got, want)
+	}
+	// ページング: 最後の要素の ID を after に渡して続きを読む
+	if got := list("", 2); !slices.Equal(got, want[:2]) {
+		t.Fatalf("first page: got %v, want %v", got, want[:2])
+	}
+	if got := list("_x", 2); !slices.Equal(got, want[2:4]) {
+		t.Fatalf("second page: got %v, want %v", got, want[2:4])
+	}
+	if got := list("b", 2); !slices.Equal(got, want[4:]) {
+		t.Fatalf("last page: got %v, want %v", got, want[4:])
+	}
+	if got := list("c-1", 2); len(got) != 0 {
+		t.Fatalf("past the end: %v", got)
+	}
+	// after は登録済みの ID でなくてもよい（途中で削除されても続きを読める）
+	if got := list("a0", 10); !slices.Equal(got, want[3:]) {
+		t.Fatalf("after a missing id: got %v, want %v", got, want[3:])
+	}
+	if got := list("", 0); len(got) != 0 {
+		t.Fatalf("limit 0: %v", got)
+	}
+
+	// 内容は GetClient と同じものが戻る
+	cs, err := s.ListClients(ctx, "", 1)
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("list one: %v, %v", cs, err)
+	}
+	if err := cs[0].Validate(); err != nil {
+		t.Fatalf("listed client must validate: %v", err)
+	}
+	// 削除した Client は一覧から消える
+	if err := s.DeleteClient(ctx, "a", base); err != nil {
+		t.Fatal(err)
+	}
+	if got := list("", 10); !slices.Equal(got, []string{"B", "_x", "b", "c-1"}) {
+		t.Fatalf("after delete: %v", got)
 	}
 }
 
@@ -895,6 +972,75 @@ func testRevokeGrantVersusIssue(t *testing.T, s authengine.Store) {
 		}
 		if tok.Status != token.AccessRevoked || gg.Active() {
 			t.Fatalf("token issued concurrently with revoke must end up revoked: %+v grant=%+v", tok, gg)
+		}
+	}
+}
+
+// testRotateVersusRevoke は、Rotation と失効（Grant、Token Family、Client の削除）を同時に走らせる。
+//
+// どちらが先になってもよいが、終わった時点で失効は全トークンに及んでいなければならない。
+// Rotation が成功したなら、その後継の Refresh Token と新しい Access Token も失効していること
+// （失効の UPDATE が、同時に挿入された行を取りこぼさないこと）。どちらの操作も、センチネル以外の
+// エラー（デッドロックなど）で失敗してはならない。競合は確率的なので回数を重ねる。
+func testRotateVersusRevoke(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	const rounds = 20
+	revokers := []struct {
+		name   string
+		revoke func(g *grant.Grant, f *token.Family) error
+	}{
+		{"grant", func(g *grant.Grant, _ *token.Family) error { return s.RevokeGrant(ctx, g.ID, base) }},
+		{"family", func(_ *grant.Grant, f *token.Family) error { return s.RevokeTokenFamily(ctx, f.ID, base) }},
+		{"client", func(g *grant.Grant, _ *token.Family) error { return s.DeleteClient(ctx, g.ClientID, base) }},
+	}
+	for _, rv := range revokers {
+		for i := 0; i < rounds; i++ {
+			suffix := fmt.Sprintf("-%s-%d", rv.name, i)
+			if err := s.CreateClient(ctx, newWebClient(t, "c"+suffix)); err != nil {
+				t.Fatal(err)
+			}
+			g, f, _, rt := seedGrantWithTokens(t, s, suffix)
+			next, access := newRefresh("rt2"+suffix, f.ID), newAccess("at2"+suffix, f.ID, g.ID)
+
+			var (
+				wg                   sync.WaitGroup
+				rotateErr, revokeErr error
+				start                = make(chan struct{})
+			)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				rotateErr = s.RotateRefreshToken(ctx, rt.Hash, next, access, base)
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				revokeErr = rv.revoke(g, f)
+			}()
+			close(start)
+			wg.Wait()
+
+			if revokeErr != nil {
+				t.Fatalf("%s round %d: revoke failed: %v", rv.name, i, revokeErr)
+			}
+			if rotateErr != nil && !errors.Is(rotateErr, storage.ErrFamilyRevoked) && !errors.Is(rotateErr, storage.ErrGrantRevoked) {
+				t.Fatalf("%s round %d: unexpected rotate error: %v", rv.name, i, rotateErr)
+			}
+			// Rotation の勝ち負けに関わらず、後継と新しい Access Token が有効なまま残っていてはならない
+			if got, err := s.LookupRefreshToken(ctx, next.Hash); err == nil && got.Status == token.RefreshActive {
+				t.Fatalf("%s round %d: successor refresh token survived the revocation (rotate err = %v)", rv.name, i, rotateErr)
+			} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
+				t.Fatal(err)
+			}
+			if got, _, err := s.LookupAccessToken(ctx, access.Hash); err == nil && got.Status == token.AccessActive {
+				t.Fatalf("%s round %d: access token issued by the rotation survived the revocation (rotate err = %v)", rv.name, i, rotateErr)
+			} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
+				t.Fatal(err)
+			}
+			if fam, err := s.GetTokenFamily(ctx, f.ID); err != nil || fam.Active() {
+				t.Fatalf("%s round %d: family must be revoked: %+v, %v", rv.name, i, fam, err)
+			}
 		}
 	}
 }

@@ -14,8 +14,11 @@ import (
 	"github.com/u-masato/auth-engine/token"
 )
 
-// DefaultIDTokenTTL は ID Token の既定の有効期間。
-const DefaultIDTokenTTL = time.Hour
+// ID Token の有効期間の既定値と上限。
+const (
+	DefaultIDTokenTTL = time.Hour
+	MaxIDTokenTTL     = 24 * time.Hour
+)
 
 // IDTokenIssuer は ID Token を発行する。token.IDTokenIssuer を実装し、Engine が token.Service に配線する。
 type IDTokenIssuer struct {

@@ -19,7 +19,7 @@ func (s *Store) GetClient(ctx context.Context, id string) (*client.Client, error
 	return scanClient(row)
 }
 
-func scanClient(row *sql.Row) (*client.Client, error) {
+func scanClient(row rowScanner) (*client.Client, error) {
 	var (
 		c            client.Client
 		redirectURIs sql.NullString
@@ -71,6 +71,27 @@ func (s *Store) CreateClient(ctx context.Context, c *client.Client) error {
 			c.ID, string(c.Profile), c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources, c.SecretHash,
 			int64(c.AccessTokenTTL), c.IDTokenAlg, boolInt(c.AllowInsecureLocalhost), mustNanos(c.CreatedAt))
 	})
+}
+
+// ListClients は id の昇順で返す。id 列の照合順序は既定の BINARY なので、バイト列としての比較になる。
+func (s *Store) ListClients(ctx context.Context, after string, limit int) ([]*client.Client, error) {
+	out := []*client.Client{}
+	if limit < 1 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+clientColumns+` FROM clients WHERE id > ? ORDER BY id LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		c, err := scanClient(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {

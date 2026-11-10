@@ -74,7 +74,8 @@ func (v *JWTVerifier) Verify(ctx context.Context, token string) (*Principal, err
 	if v.Issuer == "" {
 		return nil, errors.New("resourceserver: JWTVerifier requires Issuer")
 	}
-	// 署名の前にヘッダの alg を許可リストで確かめる（RFC 8725 §3.1）。
+	// 署名の前にヘッダの alg を許可リストで確かめ、許可していない形式を早く落とす（RFC 8725 §3.1）。
+	// これは事前の足切りで、最終的な判定は署名検証が使った alg に対して下で行う。
 	alg, err := jwtHeaderAlg(token)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
@@ -98,6 +99,12 @@ func (v *JWTVerifier) Verify(ctx context.Context, token string) (*Principal, err
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+	}
+	// 許可リストは、署名検証に実際に使われた alg で判定する（RFC 8725 §3.1）。事前確認と JOSE ライブラリでは
+	// ヘッダの読み方が違い（メンバー名の大文字小文字、重複したメンバー）、事前確認だけでは
+	// {"alg":"RS256","ALG":"ES256"} のようなヘッダで許可リストをすり抜けられる。
+	if !slices.Contains(v.algorithms(), h.Alg) {
+		return nil, fmt.Errorf("%w: algorithm %q is not allowed", ErrInvalidToken, h.Alg)
 	}
 	if !strings.EqualFold(h.Type, jwtAccessTokenType) {
 		// ID Token（typ=JWT）などとの混同を防ぐ（RFC 9068 §4）。

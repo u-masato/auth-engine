@@ -189,3 +189,21 @@ func TestRevokeRefreshTokenWithMissingFamilyIsInternalError(t *testing.T) {
 		t.Fatalf("RevokeToken with a missing family: want an internal error, got found=%v err=%v", found, err)
 	}
 }
+
+// Introspection も同じ: 有効な Refresh Token の Family が欠けているのは不整合であり、
+// 「この種別ではない」と取り違えて active: false を返さない。
+func TestInspectRefreshTokenWithMissingFamilyIsInternalError(t *testing.T) {
+	f := newFixture(t)
+	res := f.exchangeForRefresh(t)
+	f.svc.Store = missingFamilyStore{f.store}
+
+	in, err := f.svc.Inspect(f.ctx, res.RefreshToken, token.HintRefreshToken)
+	var perr *token.Error
+	if err == nil || errors.As(err, &perr) || !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("inspect with a missing family: want an internal error, got %+v %v", in, err)
+	}
+	// Access Token は Family を引かないので影響を受けない
+	if in, err := f.svc.Inspect(f.ctx, res.AccessToken, ""); err != nil || !in.Active {
+		t.Fatalf("access token must still be inspectable: %+v %v", in, err)
+	}
+}

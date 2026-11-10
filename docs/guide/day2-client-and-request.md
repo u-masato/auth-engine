@@ -151,7 +151,7 @@ flowchart TD
 
 scope は 3 段階で絞られる。
 
-1. 構文: `client.ValidScopeToken`（RFC 6749 §3.3 の scope-token。空白・`"`・`\` を含まない印字可能 ASCII）。`parseScopes` は重複も除く
+1. 構文: `client.ValidScopeToken`（RFC 6749 §3.3 の scope-token。空白・`"`・`\` を含まない印字可能 ASCII）。分解は `client.ParseScope` で、重複も除く
 2. Client の上限: `Client.DisallowedScopes`。MCP Client で文書に scope がない場合だけは上限なし（Day 7）
 3. Resource ごとの上限: `resource.Set.DisallowedScopes`。ただし OIDC の標準 scope（`openid` `profile` …）は制限を受けない（Day 7）
 

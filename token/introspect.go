@@ -16,6 +16,12 @@ const (
 	HintRefreshToken = "refresh_token"
 )
 
+// errNoSuchToken は、探している種別のトークンが存在しない（次の種別を探す）ことを表す。
+// Inspect と RevokeToken / Revoke の種別ごとの探索が共通に使う。Store の ErrNotFound を
+// そのまま使わないのは、Family の欠落のような下位の ErrNotFound を「この種別ではない」と
+// 取り違えて、黙って成功や active: false にしないため。
+var errNoSuchToken = errors.New("token: no such token")
+
 // lookupOrder は token_type_hint から探索順を返す。hint が外れていても両方の種別を探す
 // （RFC 7009 §2.1、RFC 7662 §2.1）。
 func lookupOrder(hint string) []string {
@@ -63,7 +69,7 @@ func (s *Service) Inspect(ctx context.Context, plaintext, hint string) (*Introsp
 		} else {
 			in, err = s.inspectRefresh(ctx, hash, now)
 		}
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, errNoSuchToken) {
 			continue
 		}
 		if err != nil {
@@ -74,24 +80,35 @@ func (s *Service) Inspect(ctx context.Context, plaintext, hint string) (*Introsp
 	return &Introspection{}, nil
 }
 
+// inspectAccess は Access Token の状態を返す。見つからなければ errNoSuchToken。
 func (s *Service) inspectAccess(ctx context.Context, hash string, now time.Time) (*Introspection, error) {
 	at, g, err := s.Store.LookupAccessToken(ctx, hash)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, errNoSuchToken
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("token: lookup access token: %w", err)
 	}
 	if !at.Valid(now) || !g.Active() {
 		return &Introspection{Kind: HintAccessToken}, nil
 	}
 	return &Introspection{
-		Active: true, TokenType: "Bearer", Scopes: at.Scopes, Audience: at.Audience, ClientID: at.ClientID, Subject: at.Subject,
+		Active: true, TokenType: tokenTypeBearer, Scopes: at.Scopes, Audience: at.Audience, ClientID: at.ClientID, Subject: at.Subject,
 		IssuedAt: at.IssuedAt, ExpiresAt: at.ExpiresAt, Kind: HintAccessToken,
 	}, nil
 }
 
+// inspectRefresh は Refresh Token の状態を返す。見つからなければ errNoSuchToken。
+//
+// 有効な Refresh Token が参照する Family や Grant がないのは不整合なので、「この種別ではない」と
+// 取り違えて active: false にせず、内部エラーにする（revokeRefresh と同じ扱い）。
 func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time) (*Introspection, error) {
 	rt, err := s.Store.LookupRefreshToken(ctx, hash)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, errNoSuchToken
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("token: lookup refresh token: %w", err)
 	}
 	inactive := &Introspection{Kind: HintRefreshToken}
 	if rt.Status != RefreshActive || rt.Expired(now) {

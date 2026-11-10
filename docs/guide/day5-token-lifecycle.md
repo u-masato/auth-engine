@@ -45,7 +45,7 @@
    - [token/revoke.go](../../token/revoke.go) — `RevokeToken` `Revoke` `revoke` `errNoSuchToken`
    - [token/introspect.go](../../token/introspect.go) — `lookupOrder` `Inspect` `Introspect`
    - [oidc/userinfo.go](../../oidc/userinfo.go)、[oidc/claims.go](../../oidc/claims.go)
-   - [httpapi/revocation.go](../../httpapi/revocation.go)、[httpapi/userinfo.go](../../httpapi/userinfo.go)
+   - [httpapi/revoke.go](../../httpapi/revoke.go)、[httpapi/introspect.go](../../httpapi/introspect.go)、[httpapi/userinfo.go](../../httpapi/userinfo.go)
 
 ## 解説
 

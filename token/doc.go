@@ -16,9 +16,10 @@
 // Refresh Token は Family 作成からの絶対期限（既定 30 日）と最終使用からのスライド期限
 // （既定 14 日）を持つ。Rotation のたびに後継のスライド期限は延びるが絶対期限は超えない。
 //
-// ファイル構成: service.go（Exchange の入口と authorization_code）、refresh.go（refresh_token）、
-// clientcredentials.go（client_credentials）、clientauth.go（クライアント認証）、issuer.go / jwt.go
-// （Access Token の発行）、introspect.go / revoke.go（Introspection と Revocation）。
+// ファイル構成: service.go（Service と Exchange の入口、グラント共通の部品）、authorizationcode.go
+// （authorization_code）、refresh.go（refresh_token）、clientcredentials.go（client_credentials）、
+// clientauth.go（クライアント認証）、issuer.go / jwt.go（Access Token の発行）、
+// introspect.go / revoke.go（Introspection と Revocation）。
 //
 // 対応する仕様:
 //   - RFC 6749 §2.3 Client Authentication、§4.1.3 Access Token Request、

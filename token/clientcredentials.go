@@ -74,8 +74,8 @@ func (s *Service) clientCredentials(ctx context.Context, c *client.Client, req R
 
 	return &Response{
 		AccessToken: accessPlain,
-		TokenType:   "Bearer",
-		ExpiresIn:   int64(access.ExpiresAt.Sub(now).Seconds()),
+		TokenType:   tokenTypeBearer,
+		ExpiresIn:   expiresIn(access, now),
 		Scope:       strings.Join(scopes, " "),
 	}, nil
 }

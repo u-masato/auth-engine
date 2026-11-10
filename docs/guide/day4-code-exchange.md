@@ -42,12 +42,13 @@
 3. RFC 6749 §4.1.3（トークン要求）、§5.2（エラー応答）、§4.1.2（Code の再利用で失効させる）。RFC 7636 §4.6。OIDC Core §2、§3.1.3.6（`at_hash`）。RFC 8725 §3.1（アルゴリズム混同）
 4. コード
    - [token/clientauth.go](../../token/clientauth.go) — `Credentials` `authenticateClient`
-   - [token/service.go](../../token/service.go) — `Exchange` `exchangeCode` `revokeFamilyOnReuse` `issueAccessToken` `newRefreshToken` `narrowAudience`
+   - [token/service.go](../../token/service.go) — `Exchange` `issueAccessToken` `newRefreshToken` `narrowAudience`
+   - [token/authorizationcode.go](../../token/authorizationcode.go) — `exchangeCode` `revokeFamilyOnReuse`
    - [token/token.go](../../token/token.go) — `Family` `AccessToken` `RefreshToken`
    - [token/issuer.go](../../token/issuer.go)、[token/jwt.go](../../token/jwt.go)、[token/idtoken.go](../../token/idtoken.go)
    - [oidc/idtoken.go](../../oidc/idtoken.go)
    - [keys/keys.go](../../keys/keys.go)、[keys/jwks.go](../../keys/jwks.go)
-   - [httpapi/token.go](../../httpapi/token.go)、[httpapi/discovery.go](../../httpapi/discovery.go) の `handleJWKS`
+   - [httpapi/token.go](../../httpapi/token.go)、[httpapi/clientauth.go](../../httpapi/clientauth.go)、[httpapi/discovery.go](../../httpapi/discovery.go) の `handleJWKS`
 
 ## 解説
 

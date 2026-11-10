@@ -202,6 +202,13 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
 
 - **HTTP 応答の形の変更（[#20](https://github.com/u-masato/auth-engine/issues/20)、2026-10-25）**: `/revoke` `/introspect` `/jwks` の内部障害（500）の本文を、`ErrorRenderer` が描く HTML のエラーページから、`/token` `/userinfo` と同じ JSON（`{"error":"server_error","error_description":"internal error"}`、`Content-Type: application/json`）に変えた。ステータスコード（500）と、プロトコルエラー（4xx）の形は変わらない。これらの呼び出し元は Client や Resource Server で、HTML のページは解釈できないため。[Interaction API](interaction-api.md) の契約の対象外だが、500 の本文を見ていた利用者には非互換になる。あわせて、`*token.Error` ならプロトコルエラー、それ以外は 500 とする振り分けを `/token` `/revoke` `/introspect` で `writeTokenFailure` に共通化した。
 
+- **2026-11-10 の見直し（コード全体の一貫性の確認）**: 次の 4 点は外から見える挙動が変わる。
+  - `resourceserver.JWTVerifier` の署名アルゴリズムの許可リストを、署名検証に実際に使われた `alg` で判定するようにした。これまでは署名前のヘッダの読み取り（`encoding/json`）だけで判定しており、`{"alg":"RS256","ALG":"ES256"}` のようにメンバー名の大文字小文字を変えて重ねると、ES256 だけを許す設定でも RS256 の署名が通った（JOSE ライブラリと読み方が違うため）。有効な署名鍵は要るので偽造にはならないが、「あるアルゴリズムを止める」設定が効いていなかった（RFC 8725 §3.1）。
+  - PostgreSQL Adapter の `RotateRefreshToken` が Grant → Token Family → 旧トークンの順に行をロックするようにした。これまでは旧トークンだけをロックしており、`RevokeGrant` / `DeleteClient` と同時に走ると後継の Refresh Token と新しい Access Token が `active` のまま残り、`RevokeTokenFamily` とはデッドロックしえた。読み取り側の二重チェック（Grant / Family の状態）があるので直ちには使えないが、同じ Client × subject の再同意で Grant が active に戻ると、残った Access Token が期限まで有効になった。契約テスト `RotateVersusRevoke` を足した（SQLite と memory は書き込みが直列なので影響なし）。
+  - `token.Service.Inspect`（`/introspect`）は、有効な Refresh Token が参照する Token Family や Grant が Store にない不整合を、`active: false` ではなく内部エラー（500）にする。Revocation（`errNoSuchToken`）と同じ扱いにそろえた。
+  - `client.Store` に `ListClients(ctx, after, limit)` を足した（[ADR-0005](adr/0005-storage-port.md) §2。**草案**）。自作の Adapter は実装が要る。開発者コンソールを Client 管理ダッシュボード（一覧・登録・編集・削除）にするためで、`console.Config.Known` は `Secrets` に変えた。
+- **同日の構成の整理（挙動は変わらない）**: `authorization` を [ADR-0007](adr/0007-package-layout.md) §2 のファイル構成（`begin.go` `complete.go` `resume.go` `code.go`）に分け、`token` の authorization_code を `authorizationcode.go` に、`httpapi` の `revocation.go` を `revoke.go` と `introspect.go` に、クライアント資格情報の取り出しを `clientauth.go` に分けた。main の CI を止めていた `FuzzParseScopes`（#38 で消えた `parseScopes` を参照していた）は `client.FuzzParseScope` に移した。
+
 ## M4a のタスク順序（案）
 
 - 状態: **草案**（2026-10-25）。着手前に合意する設計判断は [ADR-0010](adr/0010-client-auth-and-sender-constraint.md) に書き起こした。合意後にこの節と ADR-0010 の状態を「採用」にする。

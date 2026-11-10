@@ -56,39 +56,6 @@ func (t *Transaction) Expired(now time.Time) bool {
 	return !now.Before(t.ExpiresAt)
 }
 
-// Request は検証済みの認可要求パラメータ。
-// エンジンが解釈するもの（redirect_uri, scope, PKCE, nonce）と、
-// Interaction App へ透過するヒント（prompt, max_age, login_hint, ...）の両方を持つ。
-type Request struct {
-	ClientID string
-
-	// RedirectURI は登録情報と照合済みの、実際に使う redirect URI。
-	RedirectURI string
-	// RedirectURIExplicit は要求に redirect_uri パラメータが含まれていたか。
-	// RFC 6749 §4.1.3 により、含まれていた場合はトークン要求でも同じ値を要求する。
-	RedirectURIExplicit bool
-
-	Scopes []string
-	State  string
-
-	// PKCE（RFC 7636）。Method は常に "S256"。
-	CodeChallenge       string
-	CodeChallengeMethod string
-
-	// OIDC Core §3.1.2.1。Nonce は ID Token に転記する。他はエンジンが解釈しない。
-	Nonce     string
-	Prompt    []string
-	MaxAge    time.Duration
-	HasMaxAge bool
-	LoginHint string
-	UILocales string
-	ACRValues string
-
-	// Resource は RFC 8707 §2.1 の resource パラメータ。Engine の設定と Client の許可範囲で
-	// 検証済みで、resource.Normalize の正規形・重複なし。要求になければ空（ADR-0008 §2、§3）。
-	Resource []string
-}
-
 // Outcome は Interaction App が Complete で伝える成功結果（ADR-0003 §3 (5)）。
 type Outcome struct {
 	// Subject はエンジンにとって不透明なユーザー識別子。
@@ -110,42 +77,3 @@ type Rejection struct {
 	Error       string
 	Description string
 }
-
-// AuthorizationCode は Resume 時に発行する単回使用の Code（RFC 6749 §4.1.2）。
-// Code の平文は保存せず、SHA-256 の Hash をキーにする。
-type AuthorizationCode struct {
-	Hash string
-
-	TxnID    string
-	ClientID string
-	GrantID  string
-	// FamilyID は、この Code の交換で作られる Token Family の ID をあらかじめ確定したもの。
-	// Code の再利用を検知したとき、この Family を失効させる（RFC 6749 §4.1.2）。
-	FamilyID string
-
-	Subject             string
-	RedirectURI         string
-	RedirectURIExplicit bool
-	Scopes              []string
-	CodeChallenge       string
-	CodeChallengeMethod string
-	Nonce               string
-	// Resource は認可要求の resource をそのまま引き継いだもの（ADR-0008 §3）。
-	// Code 交換で発行する Access Token の Audience はこの部分集合になる（RFC 8707 §2.2）。
-	Resource []string
-
-	AuthenticatedAt time.Time
-	AMR             []string
-	ACR             string
-	Claims          map[string]any
-
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	ConsumedAt time.Time // ゼロ値なら未消費
-}
-
-// Consumed は消費済みかを返す。
-func (c *AuthorizationCode) Consumed() bool { return !c.ConsumedAt.IsZero() }
-
-// Expired は now 時点で期限切れかを返す。
-func (c *AuthorizationCode) Expired(now time.Time) bool { return !now.Before(c.ExpiresAt) }

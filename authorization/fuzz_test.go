@@ -110,25 +110,3 @@ func FuzzVerifyS256(f *testing.F) {
 		}
 	})
 }
-
-// FuzzParseScopes は、parseScopes が返す scope が空でなく、構文どおりで、重複がなく、
-// 元の文字列に現れた順であることを確かめる（RFC 6749 §3.3）。
-func FuzzParseScopes(f *testing.F) {
-	for _, seed := range []string{"openid profile", "openid  profile ", "openid openid", `bad"token`, "a\tb", ""} {
-		f.Add(seed)
-	}
-	f.Fuzz(func(t *testing.T, raw string) {
-		scopes, bad := parseScopes(raw)
-		if bad != "" {
-			if scopes != nil || client.ValidScopeToken(bad) {
-				t.Fatalf("parseScopes(%q) reported %q as malformed with %q", raw, bad, scopes)
-			}
-			return
-		}
-		for i, s := range scopes {
-			if !client.ValidScopeToken(s) || slices.Contains(scopes[:i], s) {
-				t.Fatalf("parseScopes(%q) = %q", raw, scopes)
-			}
-		}
-	})
-}

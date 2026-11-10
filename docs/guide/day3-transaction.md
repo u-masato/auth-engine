@@ -18,7 +18,7 @@
 | CAS（compare-and-swap） | 「現在の値が期待どおりなら書き換える」を 1 操作で行うこと。同時の遷移で 1 つだけが勝つ | `TransitionTransaction` |
 | `Patch` | 遷移と同時に書き込む値（Outcome、Rejection、Resume Token のハッシュ） | `authorization/store.go` |
 | フロントチャネル / バックチャネル | ブラウザのリダイレクトを経由する通信と、サーバー同士の直接の通信。Complete はバックチャネル、Resume はフロントチャネル | ADR-0003 §2 |
-| Begin / Complete / Reject / Resume | Interaction 契約の 4 つのユースケース。開始、成功の通知、拒否の通知、ブラウザの帰還 | `authorization/service.go` |
+| Begin / Complete / Reject / Resume | Interaction 契約の 4 つのユースケース。開始、成功の通知、拒否の通知、ブラウザの帰還 | `authorization/begin.go` `complete.go` `resume.go` |
 | Outcome | Complete で渡す成功の結果。`subject`、認証時刻、同意した scope、`amr` / `acr`、Claims | `authorization.Outcome` |
 | Rejection | Reject で渡す失敗の結果。使えるエラーコードは 5 つ | `rejectionCodes` |
 | `subject` | エンジンにとって不透明なユーザー識別子。ID Token の `sub` になる | `Outcome.Subject` |
@@ -40,9 +40,9 @@
 2. [ADR-0003 Interaction App との契約](../adr/0003-interaction-contract.md)（**最重要**。§2 のフロー、§3 の各ステップの規則、「ブラウザ結合」）
 3. [interaction-api.md](../interaction-api.md)（Interaction App 実装者に向けた同じ契約の HTTP 版）
 4. コード
-   - [authorization/transaction.go](../../authorization/transaction.go) — `Status` `CanTransitionTo` `Transaction` `Outcome` `AuthorizationCode`
+   - [authorization/transaction.go](../../authorization/transaction.go) — `Status` `CanTransitionTo` `Transaction` `Outcome`（`AuthorizationCode` は [code.go](../../authorization/code.go)）
    - [authorization/store.go](../../authorization/store.go) — `Patch` と `TransitionTransaction` の契約
-   - [authorization/service.go](../../authorization/service.go) — `Begin` `Complete` `Reject` `Resume` `issueCode`
+   - [authorization/begin.go](../../authorization/begin.go) — `Begin`、[complete.go](../../authorization/complete.go) — `Complete` `Reject`、[resume.go](../../authorization/resume.go) — `Resume` `issueCode`
    - [httpapi/authorize.go](../../httpapi/authorize.go)、[httpapi/cookie.go](../../httpapi/cookie.go)、[httpapi/interaction.go](../../httpapi/interaction.go)、[httpapi/grants.go](../../httpapi/grants.go)
    - [grant/grant.go](../../grant/grant.go)、[grant/service.go](../../grant/service.go)
    - デモの Interaction App: [examples/standalone/loginapp/loginapp.go](../../examples/standalone/loginapp/loginapp.go)

@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/u-masato/auth-engine/client"
@@ -40,7 +41,7 @@ func authenticateClient(ctx context.Context, clients client.Resolver, creds Cred
 			// CIMD 文書の取得・検証失敗。登録済み Client の列挙には役立たない情報なので理由を返す。
 			return nil, protocolErr(CodeInvalidClient, strings.TrimPrefix(err.Error(), "client: "))
 		}
-		return nil, err
+		return nil, fmt.Errorf("token: get client: %w", err)
 	}
 	method := creds.Method
 	if method == "" {

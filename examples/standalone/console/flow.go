@@ -108,7 +108,7 @@ func (a *App) handleStart(w http.ResponseWriter, r *http.Request) {
 		a.renderError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	a.remember(KnownClient{ID: c.ID, Secret: secret})
+	a.rememberSecret(c.ID, secret)
 
 	oc, err := oauthclient.NewCodeFlow(md, c.ID, a.RedirectURI(), scopes)
 	if err != nil {
@@ -154,7 +154,8 @@ func (a *App) prepareAuthorization(f *flow, scopes []string, form url.Values) er
 		f.Nonce = n
 		extra.Set("nonce", n)
 	}
-	for _, k := range []string{"prompt", "login_hint", "max_age"} {
+	// resource（RFC 8707 §2.1）は MCP Profile では必須。指定すると Access Token の Audience になる
+	for _, k := range []string{"prompt", "login_hint", "max_age", "resource"} {
 		if v := strings.TrimSpace(form.Get(k)); v != "" {
 			extra.Set(k, v)
 		}
@@ -245,6 +246,48 @@ func authMethod(f *flow) string {
 	return "none（public。client_id をフォームに入れる）"
 }
 
+// flowSummary は履歴に出すフローの要約。flow はトークン操作中に変わるので、ロックを取って写す。
+type flowSummary struct {
+	ID, ClientID string
+	Profile      client.Profile
+	Created      time.Time
+	Last         string
+	Failed       bool
+}
+
+func summarize(f *flow) flowSummary {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := flowSummary{ID: f.ID, ClientID: f.ClientID, Profile: f.Profile, Created: f.Created}
+	if n := len(f.Steps); n > 0 {
+		s.Last, s.Failed = f.Steps[n-1].Title, f.Steps[n-1].Err != ""
+	}
+	return s
+}
+
+// flowSummaries は新しい順に最大 limit 件の要約を返す。limit が 0 以下なら全部。
+func (a *App) flowSummaries(limit int) []flowSummary {
+	a.mu.Lock()
+	flows := slices.Clone(a.flowList)
+	a.mu.Unlock()
+	if limit > 0 && len(flows) > limit {
+		flows = flows[:limit]
+	}
+	out := make([]flowSummary, 0, len(flows))
+	for _, f := range flows {
+		out = append(out, summarize(f))
+	}
+	return out
+}
+
+// handleFlows はフローの履歴。プロセス内のメモリにあるものだけで、再起動すると消える。
+func (a *App) handleFlows(w http.ResponseWriter, _ *http.Request) {
+	a.render(w, "flows", struct {
+		Layout layout
+		Flows  []flowSummary
+	}{a.layout("フローの履歴", "flows"), a.flowSummaries(0)}, http.StatusOK)
+}
+
 func (a *App) lookup(id string) *flow {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -260,9 +303,9 @@ func (a *App) handleFlow(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	var buf bytes.Buffer
 	err := pages.ExecuteTemplate(&buf, "flow", struct {
-		Issuer string
+		Layout layout
 		Flow   *flow
-	}{a.cfg.Issuer, f})
+	}{a.layout("フロー", "flows"), f})
 	f.mu.Unlock()
 	if err != nil {
 		a.logger.Error("console: render flow", "error", err)

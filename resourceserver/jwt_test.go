@@ -2,7 +2,14 @@ package resourceserver_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -140,5 +147,47 @@ func TestJWTVerifierCanceledRequestDoesNotBackOff(t *testing.T) {
 	}
 	if _, err := v.Verify(context.Background(), fresh); err != nil {
 		t.Fatalf("the next request must refetch the jwks: %v (hits=%d)", err, j.hits.Load())
+	}
+}
+
+// 許可リストは署名検証に使われた alg で判定する。ヘッダに "alg" と大文字の "ALG" を並べると、
+// encoding/json は後者を、JOSE ライブラリは前者を採るので、事前確認だけでは RS256 の署名が
+// ES256 だけを許す Verifier を通ってしまう（RFC 8725 §3.1）。
+func TestJWTVerifierAllowListUsesVerifiedAlgorithm(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding.EncodeToString
+	jwks := fmt.Sprintf(`{"keys":[{"kty":"RSA","kid":"k1","use":"sig","alg":"RS256","n":%q,"e":%q}]}`,
+		b64(priv.N.Bytes()), b64(big.NewInt(int64(priv.E)).Bytes()))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(jwks)) }))
+	t.Cleanup(srv.Close)
+
+	sign := func(header string) string {
+		payload := fmt.Sprintf(`{"iss":"https://as.example.com","sub":"alice","client_id":"c","aud":"https://rs.example.com","exp":%d}`,
+			time.Now().Add(time.Hour).Unix())
+		input := b64([]byte(header)) + "." + b64([]byte(payload))
+		sum := sha256.Sum256([]byte(input))
+		sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, sum[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return input + "." + b64(sig)
+	}
+	plain := sign(`{"alg":"RS256","kid":"k1","typ":"at+jwt"}`)
+	smuggled := sign(`{"alg":"RS256","ALG":"ES256","kid":"k1","typ":"at+jwt"}`)
+	ctx := context.Background()
+
+	// 前提の確認: RS256 を許す Verifier は、この手組みのトークンを受理する
+	rs256 := &resourceserver.JWTVerifier{Issuer: "https://as.example.com", JWKSURI: srv.URL}
+	if _, err := rs256.Verify(ctx, plain); err != nil {
+		t.Fatalf("hand-built RS256 token must verify: %v", err)
+	}
+	es256Only := &resourceserver.JWTVerifier{Issuer: "https://as.example.com", JWKSURI: srv.URL, Algorithms: []string{keys.AlgES256}}
+	for name, tok := range map[string]string{"plain": plain, "smuggled": smuggled} {
+		if _, err := es256Only.Verify(ctx, tok); !errors.Is(err, resourceserver.ErrInvalidToken) {
+			t.Errorf("%s RS256 token passed an ES256-only verifier: %v", name, err)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 	"slices"
 	"strings"
@@ -159,6 +160,42 @@ func FuzzNewMCP(f *testing.F) {
 			if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 				t.Fatalf("accepted %s %q is not an absolute http(s) URL", name, v)
 			}
+		}
+	})
+}
+
+// FuzzParseScope は、ParseScope が受理した scope が構文どおりで重複がなく、元の文字列に現れた順で
+// あること、拒否するのは空の要素か不正な scope-token を含むときに限ることを確かめる（RFC 6749 §3.3）。
+// /authorize と /token の両方がこの関数で scope を分解する。
+func FuzzParseScope(f *testing.F) {
+	for _, seed := range []string{"openid profile", "openid  profile ", "openid openid", `bad"token`, "a\tb", ""} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		tokens := strings.Split(raw, " ")
+		wellFormed := raw == "" || !slices.ContainsFunc(tokens, func(s string) bool { return !ValidScopeToken(s) })
+
+		scopes, err := ParseScope(raw)
+		if !wellFormed {
+			if !errors.Is(err, ErrInvalid) || scopes != nil {
+				t.Fatalf("ParseScope(%q) = %q, %v; want ErrInvalid", raw, scopes, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("ParseScope(%q) rejected a well-formed scope: %v", raw, err)
+		}
+		// 重複を除いた結果は、元のトークン列から 2 回目以降の出現を落としたものと一致する。
+		var want []string
+		if raw != "" {
+			for _, s := range tokens {
+				if !slices.Contains(want, s) {
+					want = append(want, s)
+				}
+			}
+		}
+		if !slices.Equal(scopes, want) {
+			t.Fatalf("ParseScope(%q) = %q, want %q", raw, scopes, want)
 		}
 	})
 }
