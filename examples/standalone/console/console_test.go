@@ -18,6 +18,7 @@ import (
 	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/examples/standalone/console"
 	"github.com/u-masato/auth-engine/examples/standalone/loginapp"
+	"github.com/u-masato/auth-engine/grant"
 	"github.com/u-masato/auth-engine/httpapi"
 	"github.com/u-masato/auth-engine/keys"
 	"github.com/u-masato/auth-engine/storage"
@@ -84,7 +85,7 @@ func newEnv(t *testing.T) *env {
 	if err := store.CreateClient(t.Context(), native); err != nil {
 		t.Fatal(err)
 	}
-	app, err := console.New(console.Config{Issuer: public.URL, BaseURL: con.URL, Store: store, PageSize: 2, Logger: discard})
+	app, err := console.New(console.Config{Issuer: public.URL, BaseURL: con.URL, Store: store, Grants: engine.Grants, PageSize: 2, Logger: discard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +292,145 @@ func TestClientListPaging(t *testing.T) {
 	u, _ := e.get(t, e.console.URL+"/?open=z-batch")
 	if u.Path != "/clients/z-batch" {
 		t.Fatalf("open redirected to %s", u)
+	}
+}
+
+// シークレットの再発行は、新しい平文を 1 度表示し、旧シークレットを直ちに無効にする。
+func TestRotateSecret(t *testing.T) {
+	e := newEnv(t)
+	_, page := e.post(t, "/clients", url.Values{"profile": {"machine"}, "client_id": {"batch"}, "name": {"Batch"}, "scopes": {"api.read"}})
+	m := secretInput.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("secret is not shown after registration:\n%s", page)
+	}
+	oldSecret := m[1]
+	before, err := e.store.GetClient(t.Context(), "batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 確認欄が一致しなければ何もしない
+	status, body := e.postStatus(t, "/clients/batch/secret", url.Values{"confirm": {"other"}})
+	if status != http.StatusBadRequest || !strings.Contains(body, "再発行していない") {
+		t.Fatalf("mismatched confirmation: %d\n%s", status, body)
+	}
+	if got, err := e.store.GetClient(t.Context(), "batch"); err != nil || got.SecretHash != before.SecretHash {
+		t.Fatalf("secret must not change without confirmation: %+v, %v", got, err)
+	}
+
+	u, page := e.post(t, "/clients/batch/secret", url.Values{"confirm": {"batch"}})
+	if u.Path != "/clients/batch" || !strings.Contains(page, "再発行した") {
+		t.Fatalf("rotation ended at %s:\n%s", u, page)
+	}
+	m = secretInput.FindStringSubmatch(page)
+	if m == nil || m[1] == oldSecret {
+		t.Fatalf("the new secret must be shown once after rotation:\n%s", page)
+	}
+	newSecret := m[1]
+	got, err := e.store.GetClient(t.Context(), "batch")
+	if err != nil || !got.VerifySecret(newSecret) || got.VerifySecret(oldSecret) || got.Name != "Batch" {
+		t.Fatalf("store must hold only the new secret: %+v, %v", got, err)
+	}
+
+	// 旧シークレットはトークンエンドポイントで拒否され、新しいシークレットは通る（RFC 6749 §5.2）
+	_, page = e.post(t, "/flows", url.Values{"client_id": {"batch"}, "secret": {oldSecret}, "scope": {"api.read"}})
+	if !strings.Contains(page, "invalid_client") {
+		t.Fatalf("the old secret must be rejected:\n%s", page)
+	}
+	_, page = e.post(t, "/flows", url.Values{"client_id": {"batch"}, "secret": {newSecret}, "scope": {"api.read"}})
+	assertAllPassed(t, page, "トークン要求（client_credentials）", `&#34;scope&#34;: &#34;api.read&#34;`)
+
+	// コンソールの外で再発行されたら、覚えている平文は表示しない（古い値を開始フォームに入れない）
+	cur, err := e.store.GetClient(t.Context(), "batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside, _, err := cur.RotateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.RotateClientSecret(t.Context(), "batch", outside.SecretHash); err != nil {
+		t.Fatal(err)
+	}
+	_, page = e.get(t, e.console.URL+"/clients/batch")
+	if strings.Contains(page, newSecret) || !strings.Contains(page, "コンソールは平文を知らない") {
+		t.Fatalf("a secret rotated elsewhere must not be shown:\n%s", page)
+	}
+
+	// public クライアントには再発行の欄がなく、直接送っても拒否される
+	_, native := e.get(t, e.console.URL+"/clients/demo-cli")
+	if strings.Contains(native, "/clients/demo-cli/secret") {
+		t.Fatalf("a public client must not offer secret rotation:\n%s", native)
+	}
+	status, body = e.postStatus(t, "/clients/demo-cli/secret", url.Values{"confirm": {"demo-cli"}})
+	if status != http.StatusBadRequest || !strings.Contains(body, "シークレットを持たない") {
+		t.Fatalf("rotating a public client: %d\n%s", status, body)
+	}
+	status, _ = e.postStatus(t, "/clients/missing/secret", url.Values{"confirm": {"missing"}})
+	if status != http.StatusNotFound {
+		t.Fatalf("rotating a missing client: %d", status)
+	}
+}
+
+// 詳細画面は Client の利用者（Grant）を subject の昇順で一覧し、1 人ずつ連携を解除できる。
+func TestClientGrants(t *testing.T) {
+	e := newEnv(t)
+	_, page := e.get(t, e.console.URL+"/clients/demo-cli")
+	if !strings.Contains(page, "まだ誰も同意していない") {
+		t.Fatalf("no grants yet:\n%s", page)
+	}
+
+	// フローを通すと alice の Grant ができ、Access Token が有効になる
+	flowURL, _ := e.runCodeFlow(t, url.Values{"client_id": {"demo-cli"}, "scope": {"openid profile"}})
+	_, page = e.post(t, flowURL.Path+"/userinfo", nil)
+	assertAllPassed(t, page, `&#34;sub&#34;: &#34;alice&#34;`)
+	_, page = e.get(t, e.console.URL+"/clients/demo-cli")
+	if !strings.Contains(page, "<code>alice</code>") || !strings.Contains(page, `<span class="ok">active</span>`) ||
+		!strings.Contains(page, `action="/clients/demo-cli/grants/revoke"`) {
+		t.Fatalf("alice's grant must be listed as active:\n%s", page)
+	}
+
+	// ページング（テストの PageSize は 2）: alice、bob | carol
+	now := time.Now()
+	for _, sub := range []string{"carol", "bob"} {
+		if _, err := e.store.UpsertGrant(t.Context(), &grant.Grant{ID: "g-" + sub, ClientID: "demo-cli", Subject: sub,
+			Scopes: []string{"openid"}, Status: grant.StatusActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, first := e.get(t, e.console.URL+"/clients/demo-cli")
+	if !strings.Contains(first, "<code>alice</code>") || !strings.Contains(first, "<code>bob</code>") || strings.Contains(first, "<code>carol</code>") ||
+		!strings.Contains(first, `href="/clients/demo-cli?grants_after=bob#grants"`) {
+		t.Fatalf("first page must list alice and bob and link to the next page:\n%s", first)
+	}
+	_, second := e.get(t, e.console.URL+"/clients/demo-cli?grants_after=bob")
+	if !strings.Contains(second, "<code>carol</code>") || strings.Contains(second, "<code>alice</code>") || strings.Contains(second, "次へ") {
+		t.Fatalf("second page must list carol only and be the last:\n%s", second)
+	}
+
+	// 連携の解除: Grant が失効し、配下のトークンも使えなくなる
+	u, page := e.post(t, "/clients/demo-cli/grants/revoke", url.Values{"subject": {"alice"}})
+	if u.Path != "/clients/demo-cli" || !strings.Contains(page, "alice との連携を解除した") || !strings.Contains(page, "revoked（") {
+		t.Fatalf("revocation ended at %s:\n%s", u, page)
+	}
+	if g, err := e.store.FindGrant(t.Context(), "demo-cli", "alice"); err != nil || g.Active() {
+		t.Fatalf("alice's grant must be revoked: %+v, %v", g, err)
+	}
+	if g, err := e.store.FindGrant(t.Context(), "demo-cli", "bob"); err != nil || !g.Active() {
+		t.Fatalf("bob's grant must stay active: %+v, %v", g, err)
+	}
+	_, page = e.post(t, flowURL.Path+"/userinfo", nil)
+	if !strings.Contains(page, "invalid_token") {
+		t.Fatalf("the access token must be rejected after the grant is revoked:\n%s", page)
+	}
+
+	status, body := e.postStatus(t, "/clients/demo-cli/grants/revoke", url.Values{"subject": {"nobody"}})
+	if status != http.StatusNotFound || !strings.Contains(body, "Grant はない") {
+		t.Fatalf("revoking an unknown grant: %d\n%s", status, body)
+	}
+	status, _ = e.postStatus(t, "/clients/demo-cli/grants/revoke", url.Values{})
+	if status != http.StatusBadRequest {
+		t.Fatalf("revoking without a subject: %d", status)
 	}
 }
 

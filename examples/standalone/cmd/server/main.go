@@ -2,11 +2,14 @@
 //
 //	go run ./cmd/server -db ./auth.db
 //
-// 起動すると 4 つのリスナーが立つ。
+// 起動すると 4 つのリスナーが立つ。環境変数 AUTH_ENGINE_ADMIN_TOKEN を設定すると管理 API も立つ。
 //   - 公開エンドポイント（既定 :8080）: /authorize, /token, /.well-known/oauth-authorization-server
 //   - Interaction API（既定 127.0.0.1:8081）: Interaction App だけが使う。外部に公開しない
 //   - デモ Interaction App（既定 :8082）: /login
-//   - 開発者コンソール（既定 127.0.0.1:8083）: Client の一覧・登録・編集・削除とフローの手動確認。-console-addr "" で無効
+//   - 開発者コンソール（既定 127.0.0.1:8083）: Client の一覧・登録・編集・削除、シークレットの再発行、
+//     利用者（Grant）の一覧と連携解除、フローの手動確認。-console-addr "" で無効
+//   - 管理 API（既定 127.0.0.1:8084）: 運用者向けの JSON API（adminapi）。Bearer トークンで認証する。
+//     トークン（AUTH_ENGINE_ADMIN_TOKEN、32 バイト以上）を設定しなければ起動しない
 //
 // 初回起動時にデモ用クライアント demo-cli（Native、loopback redirect）を登録する。
 // cmd/cli-client がこのクライアントでフローを実行できる。
@@ -31,7 +34,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +41,7 @@ import (
 	"github.com/u-masato/auth-engine/adapters/sqlite"
 	"github.com/u-masato/auth-engine/cimd"
 	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/examples/standalone/adminapi"
 	"github.com/u-masato/auth-engine/examples/standalone/console"
 	"github.com/u-masato/auth-engine/examples/standalone/loginapp"
 	"github.com/u-masato/auth-engine/httpapi"
@@ -61,6 +64,7 @@ func main() {
 		insecureIssuer  = flag.Bool("allow-insecure-issuer", false, "allow an http issuer other than localhost (e.g. http://host.docker.internal:8080; local development only)")
 		consoleAddr     = flag.String("console-addr", "127.0.0.1:8083", "listen address for the developer console (empty to disable; it writes to the store without authentication, so keep it on loopback)")
 		consoleURL      = flag.String("console-url", "http://127.0.0.1:8083", "public URL of the developer console (its redirect URI is this + /callback)")
+		adminAddr       = flag.String("admin-addr", "127.0.0.1:8084", "listen address for the admin API (keep private; it starts only when "+adminTokenEnv+" is set)")
 		resourcesPath   = flag.String("resources", "", "JSON file of resource servers (RFC 8707 resource indicators; see resources.json)")
 		cimdEnabled     = flag.Bool("cimd", true, "resolve URL client_ids with Client ID Metadata Documents (MCP clients without registration)")
 		cimdLoopback    = flag.Bool("cimd-allow-loopback", false, "allow fetching metadata documents from loopback addresses (local development only; e.g. cmd/cimd-host)")
@@ -73,6 +77,7 @@ func main() {
 		dbPath: *dbPath, keysPath: *keysPath, issuer: *issuer, publicAddr: *publicAddr, interactionAddr: *interactionAddr,
 		loginAddr: *loginAddr, loginURL: *loginURL, autoApprove: *autoApprove, clientsPath: *clientsPath, insecureIssuer: *insecureIssuer,
 		consoleAddr: *consoleAddr, consoleURL: *consoleURL, resourcesPath: *resourcesPath,
+		adminAddr: *adminAddr, adminToken: os.Getenv(adminTokenEnv),
 		cimd: *cimdEnabled, cimdLoopback: *cimdLoopback, cimdCA: *cimdCA,
 	}); err != nil {
 		logger.Error("server exited", "error", err)
@@ -80,9 +85,16 @@ func main() {
 	}
 }
 
+// adminTokenEnv は管理 API の Bearer トークンを渡す環境変数。フラグにしないのは、コマンドラインが
+// ps で他の利用者から見えるからである。
+const adminTokenEnv = "AUTH_ENGINE_ADMIN_TOKEN"
+
+// minAdminTokenLength は管理 API のトークンの最小長（バイト）。Client Secret と同じ基準にする。
+const minAdminTokenLength = client.MinSecretLength
+
 type options struct {
 	dbPath, keysPath, issuer, publicAddr, interactionAddr, loginAddr, loginURL, clientsPath, consoleAddr, consoleURL string
-	resourcesPath, cimdCA                                                                                            string
+	resourcesPath, cimdCA, adminAddr, adminToken                                                                     string
 	autoApprove, insecureIssuer, cimd, cimdLoopback                                                                  bool
 }
 
@@ -157,12 +169,27 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	}
 	names := []string{"public", "interaction", "login"}
 	if o.consoleAddr != "" {
-		con, err := console.New(console.Config{Issuer: o.issuer, BaseURL: o.consoleURL, Store: store, Secrets: secrets, Logger: logger})
+		con, err := console.New(console.Config{Issuer: o.issuer, BaseURL: o.consoleURL, Store: store, Grants: engine.Grants, Secrets: secrets, Logger: logger})
 		if err != nil {
 			return err
 		}
 		servers = append(servers, &http.Server{Addr: o.consoleAddr, Handler: con.Handler(), ReadHeaderTimeout: 5 * time.Second})
 		names = append(names, "console")
+	}
+	// 管理 API はトークンを設定したときだけ起動する（認証なしでは公開しない）。
+	switch {
+	case o.adminToken == "" || o.adminAddr == "":
+		logger.Info("admin api disabled", "hint", "set "+adminTokenEnv+" to enable it")
+	case len(o.adminToken) < minAdminTokenLength:
+		return fmt.Errorf("%s must be at least %d bytes", adminTokenEnv, minAdminTokenLength)
+	default:
+		admin, err := adminapi.New(adminapi.Config{Store: store, Grants: engine.Grants,
+			Auth: httpapi.BearerAuthenticator{Token: o.adminToken}, Logger: logger})
+		if err != nil {
+			return err
+		}
+		servers = append(servers, &http.Server{Addr: o.adminAddr, Handler: admin.Handler(), ReadHeaderTimeout: 5 * time.Second})
+		names = append(names, "admin")
 	}
 	errCh := make(chan error, len(servers))
 	for i, s := range servers {
@@ -217,30 +244,22 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 	return nil
 }
 
-// clientSpec は -clients で読むクライアント定義。
-type clientSpec struct {
-	ClientID               string   `json:"client_id"`
-	Profile                string   `json:"profile"` // web | native | machine | mcp
-	Name                   string   `json:"name"`
-	RedirectURIs           []string `json:"redirect_uris"`
-	Scopes                 []string `json:"scopes"`
-	Resources              []string `json:"resources"`  // 要求できる resource の上限（RFC 8707）。空なら設定済みの全部
-	Secret                 string   `json:"secret"`     // web / machine。空なら生成してログに出す
-	ClientURI              string   `json:"client_uri"` // mcp（CIMD 文書の client_uri）
-	IDTokenAlg             string   `json:"id_token_alg"`
-	AllowInsecureLocalhost bool     `json:"allow_insecure_localhost"`
-}
-
 // registerClientsFromFile は JSON ファイルのクライアントを登録し、分かっている Client Secret（client_id → 平文）を返す。
+// ファイルは adminapi.ClientSpec の配列で、管理 API の POST /clients の本文と同じ形である。
+// 項目名の打ち間違いが既定値での登録にならないよう、未知の項目は拒否する。
+//
 // 既に同じ client_id があれば変更せずに飛ばす（起動のたびに登録内容を上書きしない。変えるときはコンソールの
-// 編集画面か Client.Update + Store.UpdateClient を使う）。
+// 編集画面か管理 API を使う）。
 func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("read clients %s: %w", path, err)
 	}
-	var specs []clientSpec
-	if err := json.Unmarshal(data, &specs); err != nil {
+	defer f.Close()
+	var specs []adminapi.ClientSpec
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&specs); err != nil {
 		return nil, fmt.Errorf("parse clients %s: %w", path, err)
 	}
 	now := time.Now()
@@ -248,34 +267,14 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 	for _, sp := range specs {
 		if _, err := store.GetClient(ctx, sp.ClientID); err == nil {
 			logger.Info("client already registered", "client_id", sp.ClientID)
-			if sp.Secret != "" {
-				secrets[sp.ClientID] = sp.Secret
+			if sp.ClientSecret != "" {
+				secrets[sp.ClientID] = sp.ClientSecret
 			}
 			continue
 		} else if !errors.Is(err, storage.ErrNotFound) {
 			return nil, err
 		}
-		var (
-			c      *client.Client
-			secret client.Secret
-		)
-		switch client.Profile(sp.Profile) {
-		case client.ProfileWeb:
-			c, secret, err = client.NewWeb(client.WebParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, RedirectURIs: sp.RedirectURIs,
-				Scopes: sp.Scopes, Resources: sp.Resources, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
-		case client.ProfileNative:
-			c, err = client.NewNative(client.NativeParams{ID: sp.ClientID, Name: sp.Name, RedirectURIs: sp.RedirectURIs,
-				Scopes: sp.Scopes, Resources: sp.Resources, IDTokenAlg: sp.IDTokenAlg, AllowInsecureLocalhost: sp.AllowInsecureLocalhost}, now)
-		case client.ProfileMachine:
-			c, secret, err = client.NewMachine(client.MachineParams{ID: sp.ClientID, Name: sp.Name, Secret: sp.Secret, Scopes: sp.Scopes, Resources: sp.Resources}, now)
-		case client.ProfileMCP:
-			// URL 形式の client_id を事前登録する経路（CIMD §7）。文書は取得せず、ここに書いた内容が登録情報になる。
-			// Store にあるものが CIMD より優先される（client.ChainResolver）。
-			c, err = client.NewMCP(client.MetadataDocument{ClientID: sp.ClientID, ClientName: sp.Name, ClientURI: sp.ClientURI,
-				RedirectURIs: sp.RedirectURIs, Scope: strings.Join(sp.Scopes, " ")}, sp.ClientID, now)
-		default:
-			return nil, fmt.Errorf("client %s: unknown profile %q", sp.ClientID, sp.Profile)
-		}
+		c, secret, err := sp.NewClient(now)
 		if err != nil {
 			return nil, fmt.Errorf("client %s: %w", sp.ClientID, err)
 		}
@@ -283,7 +282,7 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 			return nil, fmt.Errorf("client %s: %w", sp.ClientID, err)
 		}
 		attrs := []any{"client_id", c.ID, "profile", c.Profile}
-		if secret != "" && sp.Secret == "" {
+		if secret != "" && sp.ClientSecret == "" {
 			attrs = append(attrs, "generated_secret", string(secret)) // 1 回しか得られないので表示する
 		}
 		logger.Info("registered client from file", attrs...)
