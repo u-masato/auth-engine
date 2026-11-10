@@ -13,7 +13,7 @@ import (
 var ErrNotFound = errors.New("grant: not found")
 
 // Service は Grant の管理操作（ADR-0006 §5）。プロトコル上の対応物はなく、Go API と
-// Interaction API（GET /grants）から使う。フィールドは Engine が配線する。
+// Interaction API（GET /grants、DELETE /grants）から使う。フィールドは Engine が配線する。
 type Service struct {
 	Store Store
 	Clock clock.Clock

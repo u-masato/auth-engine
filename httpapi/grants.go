@@ -58,3 +58,27 @@ func (s *Server) handleListGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, body)
 }
+
+// handleRevokeGrant は Interaction API の DELETE /grants?subject=...&client_id=...（ADR-0006 §5）。
+//
+// 「このアプリとの連携を解除する」操作。Grant と配下の全 Token Family・全トークンを失効させる。
+// subject と client_id は必須（取り違えて subject の全 Grant を消さないよう、一括の解除は置かない）。
+// 成功は 204。既に失効済みでも 204（冪等）。該当する Grant がなければ 404 not_found。
+func (s *Server) handleRevokeGrant(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	subject, clientID := q.Get("subject"), q.Get("client_id")
+	if subject == "" || clientID == "" {
+		writeJSONError(w, http.StatusBadRequest, "invalid_request", "subject and client_id are required")
+		return
+	}
+	err := s.engine.Grants.Revoke(r.Context(), clientID, subject)
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store") // 本文はないが、他の Interaction API の応答とそろえる
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, grant.ErrNotFound):
+		writeJSONError(w, http.StatusNotFound, "not_found", "grant not found")
+	default:
+		s.jsonInternalError(w, r, err)
+	}
+}
