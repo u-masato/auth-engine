@@ -207,6 +207,13 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - PostgreSQL Adapter の `RotateRefreshToken` が Grant → Token Family → 旧トークンの順に行をロックするようにした。これまでは旧トークンだけをロックしており、`RevokeGrant` / `DeleteClient` と同時に走ると後継の Refresh Token と新しい Access Token が `active` のまま残り、`RevokeTokenFamily` とはデッドロックしえた。読み取り側の二重チェック（Grant / Family の状態）があるので直ちには使えないが、同じ Client × subject の再同意で Grant が active に戻ると、残った Access Token が期限まで有効になった。契約テスト `RotateVersusRevoke` を足した（SQLite と memory は書き込みが直列なので影響なし）。
   - `token.Service.Inspect`（`/introspect`）は、有効な Refresh Token が参照する Token Family や Grant が Store にない不整合を、`active: false` ではなく内部エラー（500）にする。Revocation（`errNoSuchToken`）と同じ扱いにそろえた。
   - `client.Store` に `ListClients(ctx, after, limit)` を足した（[ADR-0005](adr/0005-storage-port.md) §3。PR #39 のマージで確定）。自作の Adapter は実装が要る。開発者コンソールを Client 管理ダッシュボード（一覧・登録・編集・削除）にするためで、`console.Config.Known` は `Secrets` に変えた。
+- **運用の基本操作の追加（2026-11-11。状態は草案で、PR のマージで確定）**: 見直しで「実運用に足りない」とした 3 点を足した。設計は [ADR-0004](adr/0004-client-profiles.md) §8 と [ADR-0005](adr/0005-storage-port.md) §2〜§3。外から見える変更は次のとおり。
+  - シークレットの再発行: `Client.RotateSecret()` と `client.Store.RotateClientSecret(ctx, id, secretHash)`。保存した時点で旧シークレットは無効になり、新旧の併用期間はない。発行済みのトークンと Grant には触れない。自作の Adapter は実装が要る。
+  - `Store.UpdateClient` はシークレットのハッシュを書かなくなった。これまでは `Client` をそのまま保存していたので、再発行を足すと、古い値の保存で旧シークレットが戻る経路になるため。`Client.Update` で作った値を保存する使い方では挙動は変わらない。
+  - Client ごとの Grant の一覧: `grant.Store.ListGrantsByClient(ctx, clientID, after, limit)` と `grant.Service.ListByClient`（Subject の昇順、キーセットページング、失効済みも含む）。PostgreSQL Adapter に索引のマイグレーション（`00005_grants_by_client.sql`）を足した。自作の Adapter は実装が要る。
+  - 管理 API の例 `examples/standalone/adminapi`（Bearer 認証付きの JSON API）。コアに HTTP の管理 API を入れない方針（ADR-0004「影響」）は変えていない。`cmd/server` は `AUTH_ENGINE_ADMIN_TOKEN` を設定したときだけ `-admin-addr`（既定 `127.0.0.1:8084`）で起動する。開発者コンソールの詳細画面に、シークレットの再発行と、利用者の一覧・連携解除を足した（`console.Config.Grants` が必須になった）。
+  - `-clients` のファイルの書式を `adminapi.ClientSpec`（管理 API の本文と同じ）にそろえた。シークレットの項目名は `secret` から `client_secret` に変わり、`logo_uri` `policy_uri` `access_token_ttl`（秒）が指定できる。未知の項目があると起動を止める（旧書式の `secret` を黙って無視し、別のシークレットを生成することがないように）。
+  - 見送ったもの: シークレットの新旧併用（無停止の交換は M4a の `private_key_jwt` で扱う）、運用者ごとの認証と「誰が」の監査（`adminapi.Authenticator` を差し替える前提の例にとどめた）、SQLite の `grants(subject)` の索引（今回の一覧は一意制約の索引を使うので関係しない）。
 - **同日の構成の整理（挙動は変わらない）**: `authorization` を [ADR-0007](adr/0007-package-layout.md) §2 のファイル構成（`begin.go` `complete.go` `resume.go` `code.go`）に分け、`token` の authorization_code を `authorizationcode.go` に、`httpapi` の `revocation.go` を `revoke.go` と `introspect.go` に、クライアント資格情報の取り出しを `clientauth.go` に分けた。main の CI を止めていた `FuzzParseScopes`（#38 で消えた `parseScopes` を参照していた）は `client.FuzzParseScope` に移した。
 
 ## M4a のタスク順序（案）

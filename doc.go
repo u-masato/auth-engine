@@ -19,6 +19,9 @@
 //   - Keys: 署名鍵セット（keys パッケージ）。RS256 の署名鍵を含め、再起動後も同じ鍵を使えるよう保存する。
 //   - Client の登録: client.NewWeb / NewNative / NewMachine で作り、Store.CreateClient で登録する。
 //     変更は Client.Update と Store.UpdateClient、一覧は Store.ListClients、削除は Store.DeleteClient。
+//     シークレットの再発行は Client.RotateSecret と Store.RotateClientSecret。Client を利用している
+//     ユーザーの一覧は Engine.Grants.ListByClient、連携の解除は Engine.Grants.Revoke。
+//     これらを HTTP で提供する例が examples/standalone/adminapi にある（コアは管理 API を持たない）。
 //   - Interaction App: ログイン・同意画面。docs/interaction-api.md の契約に従って実装する。
 //
 // MCP 連携（docs/adr/0008-mcp-integration.md）を使うときは、さらに Config.Resources に
