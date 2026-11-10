@@ -21,8 +21,11 @@ func TestCacheTTL(t *testing.T) {
 		{"MAX-AGE=3600", time.Hour},
 		{"max-age=10", minTTL}, // 下限に丸める
 		{"max-age=0", minTTL},
-		{"max-age=999999999", maxTTL}, // 上限に丸める
-		{"no-store", minTTL},          // 下限を設ける判断（ADR-0008 §5）
+		{"max-age=999999999", maxTTL},            // 上限に丸める
+		{"max-age=9223372037", maxTTL},           // time.Duration に収まらない秒数も上限（溢れて負にしない）
+		{"s-maxage=9223372036854775807", maxTTL}, // int64 の最大値
+		{"max-age=9223372036854775808", minTTL},  // int64 に収まらない値は読めない値と同じ
+		{"no-store", minTTL},                     // 下限を設ける判断（ADR-0008 §5）
 		{"no-cache, max-age=3600", minTTL},
 		{"max-age=abc", minTTL},
 		{"max-age=-5", minTTL},

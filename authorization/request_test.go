@@ -24,7 +24,7 @@ func (f fakeResolver) GetClient(_ context.Context, id string) (*client.Client, e
 
 var testNow = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 
-func testClients(t *testing.T) fakeResolver {
+func testClients(t testing.TB) fakeResolver {
 	t.Helper()
 	web, _, err := client.NewWeb(client.WebParams{ID: "web", Name: "Web",
 		RedirectURIs: []string{"https://app.example.com/cb?env=prod", "https://app.example.com/cb2"},
@@ -59,7 +59,7 @@ func testClients(t *testing.T) fakeResolver {
 }
 
 // testResources は Opaque 2 件と JWT 1 件の Resource Server 設定。
-func testResources(t *testing.T) *resource.Set {
+func testResources(t testing.TB) *resource.Set {
 	t.Helper()
 	set, err := resource.NewSet([]resource.Resource{
 		{URI: "https://api.example.com"},

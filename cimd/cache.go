@@ -1,6 +1,7 @@
 package cimd
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -125,10 +126,12 @@ func parseMaxAge(cc string) (time.Duration, bool) {
 			if err != nil || sec < 0 {
 				continue
 			}
+			// time.Duration に収まらない秒数は掛け算で負に溢れるので、表せる最大値で抑える（呼び出し側が上限に丸める）
+			d := time.Duration(min(sec, int64(math.MaxInt64/time.Second))) * time.Second
 			if name == "max-age" {
-				maxAge, hasMax = time.Duration(sec)*time.Second, true
+				maxAge, hasMax = d, true
 			} else {
-				sMaxAge, hasSMax = time.Duration(sec)*time.Second, true
+				sMaxAge, hasSMax = d, true
 			}
 		}
 	}

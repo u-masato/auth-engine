@@ -38,8 +38,13 @@ func TestParseClientIDURL(t *testing.T) {
 		{"https://mcp-client.example/client#", false},
 		{"https://mcp-client.example/a/./client", false},
 		{"https://mcp-client.example/a/../client", false},
-		{"https:///client", false}, // host なし
-		{"web-app", false},         // Store の client_id
+		{"https://mcp-client.example/a/%2e%2e/client", false}, // エンコードした dot セグメント（RFC 3986 §2.3）
+		{"https://mcp-client.example/a/%2E/client", false},
+		{"https://mcp-client.example/a/.%2e/client", false},
+		{"https://mcp-client.example/a%2F..%2Fclient", false}, // 復号すると dot セグメントになる（安全側）
+		{"https://mcp-client.example/a/%2e%2ex/client", true}, // "..x" は dot セグメントではない
+		{"https:///client", false},                            // host なし
+		{"web-app", false},                                    // Store の client_id
 		{"", false},
 		{"HTTPS://mcp-client.example/client", false}, // 文書の client_id と単純比較するので小文字のみ
 	}
@@ -127,6 +132,11 @@ func TestNewMCPRejects(t *testing.T) {
 		{"response_types token", func(d *MetadataDocument) { d.ResponseTypes = []string{"code", "token"} }, docURL},
 		{"malformed scope token", func(d *MetadataDocument) { d.Scope = `files:read "quoted"` }, docURL},
 		{"client_uri relative", func(d *MetadataDocument) { d.ClientURI = "mcp-client.example" }, docURL},
+		{"client_uri javascript", func(d *MetadataDocument) { d.ClientURI = "javascript:alert(1)" }, docURL},
+		{"logo_uri data", func(d *MetadataDocument) { d.LogoURI = "data:image/svg+xml,<svg onload=alert(1)>" }, docURL},
+		{"logo_uri relative", func(d *MetadataDocument) { d.LogoURI = "/logo.png" }, docURL},
+		{"policy_uri javascript", func(d *MetadataDocument) { d.PolicyURI = "javascript:alert(1)" }, docURL},
+		{"policy_uri without host", func(d *MetadataDocument) { d.PolicyURI = "https:///policy" }, docURL},
 		{"client_id too long", func(d *MetadataDocument) {
 			d.ClientID = "https://mcp-client.example/" + strings.Repeat("a", 240)
 		}, "https://mcp-client.example/" + strings.Repeat("a", 240)},
