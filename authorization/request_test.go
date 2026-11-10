@@ -234,7 +234,8 @@ func TestParseRequestDefaultRedirectAndDedupScopes(t *testing.T) {
 	clients := testClients(t)
 	clients["plain"] = plain
 	p.Set("client_id", "plain")
-	p.Set("scope", "read  read")
+	// 連続した空白は RFC 6749 §3.3 の文法違反なので、重複の確認は単一の空白で行う（#22）。
+	p.Set("scope", "read read")
 	req, perr := parse(t, clients, p)
 	if perr != nil {
 		t.Fatal(perr)
@@ -358,5 +359,17 @@ func TestParseRequestOpenIDRequiresIDTokenProfile(t *testing.T) {
 	req, perr := parse(t, testClients(t), p)
 	if perr != nil || req.RedirectURI != "http://127.0.0.1:9999/cb" {
 		t.Fatalf("loopback port: %+v %v", req, perr)
+	}
+}
+
+func TestParseRequestRejectsEmptyScopeElements(t *testing.T) {
+	// RFC 6749 §3.3 の文法は空のトークンを許さない。/token と同じく /authorize も
+	// 連続した空白や前後の空白を invalid_scope として拒否する（#22）。
+	for _, raw := range []string{"openid  profile", " openid", "openid "} {
+		p := baseParams()
+		p.Set("scope", raw)
+		if _, perr := parse(t, testClients(t), p); perr == nil || perr.Code != CodeInvalidScope {
+			t.Fatalf("scope=%q: %+v", raw, perr)
+		}
 	}
 }

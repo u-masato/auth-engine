@@ -318,22 +318,15 @@ func (s *Service) refreshIdleTTL() time.Duration {
 	return s.RefreshTokenIdleTTL
 }
 
-// parseScope は scope パラメータ（RFC 6749 §3.3）を分解し、空の要素と不正な scope-token を拒否する。
-// 未指定（空文字）なら nil を返す。
+// parseScope は scope パラメータ（RFC 6749 §3.3）を分解する。分解そのものは
+// client.ParseScope に一本化しており、/authorize と同じく空の要素と不正な
+// scope-token を拒否する。未指定（空文字）なら nil を返す。
 func parseScope(raw string) ([]string, *Error) {
-	if raw == "" {
-		return nil, nil
+	scopes, err := client.ParseScope(raw)
+	if err != nil {
+		return nil, protocolErr(CodeInvalidScope, "malformed scope")
 	}
-	var out []string
-	for _, s := range strings.Split(raw, " ") {
-		if !client.ValidScopeToken(s) {
-			return nil, protocolErr(CodeInvalidScope, "malformed scope")
-		}
-		if !slices.Contains(out, s) {
-			out = append(out, s)
-		}
-	}
-	return out, nil
+	return scopes, nil
 }
 
 func (s *Service) logger() *slog.Logger {

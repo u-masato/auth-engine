@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // validateScopes は scope の一覧が空でなく（optional なら空も可）、各要素が RFC 6749 §3.3 の
@@ -56,4 +57,24 @@ func (c *Client) DisallowedScopes(requested []string) []string {
 		}
 	}
 	return out
+}
+
+// ParseScope は scope パラメータ（RFC 6749 §3.3）を分解し、重複を除いて返す。
+// 文法は scope-token *( SP scope-token ) で空のトークンを許さないため、連続した空白や
+// 前後の空白は ErrInvalid になる。/authorize と /token の両方がここを通る。
+// 未指定（空文字）なら nil を返す。
+func ParseScope(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, s := range strings.Split(raw, " ") {
+		if !ValidScopeToken(s) {
+			return nil, fmt.Errorf("%w: invalid scope token %q", ErrInvalid, s)
+		}
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
