@@ -12,8 +12,8 @@ auth-engine の実装を、数日かけてコードと一緒に読み進める�
 | --- | --- | --- | --- |
 | [Day 1](day1-overview.md) | 全体像と組み立て | §1〜§4 | `engine.go` `store.go` `httpapi/server.go` |
 | [Day 2](day2-client-and-request.md) | Client Profile と認可要求の検証 | §2、§5 前半、§7 の Profile 表 | `client/` `authorization/request.go` `authorization/pkce.go` |
-| [Day 3](day3-transaction.md) | Transaction と Interaction 契約、Code 発行まで | §5、§6 | `authorization/service.go` `httpapi/authorize.go` `httpapi/interaction.go` `grant/` |
-| [Day 4](day4-code-exchange.md) | Code 交換、Access Token、ID Token、鍵 | §5 後半、§7 | `token/service.go` `token/issuer.go` `oidc/` `keys/` |
+| [Day 3](day3-transaction.md) | Transaction と Interaction 契約、Code 発行まで | §5、§6 | `authorization/begin.go` `complete.go` `resume.go` `httpapi/authorize.go` `httpapi/interaction.go` `grant/` |
+| [Day 4](day4-code-exchange.md) | Code 交換、Access Token、ID Token、鍵 | §5 後半、§7 | `token/service.go` `token/authorizationcode.go` `token/issuer.go` `oidc/` `keys/` |
 | [Day 5](day5-token-lifecycle.md) | Refresh Rotation、M2M、失効、検査、UserInfo | §7 | `token/refresh.go` `token/revoke.go` `token/introspect.go` `oidc/userinfo.go` |
 | [Day 6](day6-storage.md) | 永続化と並行処理 | §9 | `storage/` `adapters/sqlite` `adapters/postgres` |
 | [Day 7](day7-mcp.md) | MCP 連携と Resource Server、総まとめ | §8、§10、§11 | `resource/` `cimd/` `resourceserver/` |
@@ -51,7 +51,7 @@ git worktree remove --force ../auth-engine-lab
 この解説書は行番号を書かない（コードが変わるとずれるため）。代わりに**関数名・型名**で示すので、エディタのシンボル検索か `grep -n` で引くこと。
 
 ```bash
-grep -n 'func (s \*Service) Resume' authorization/service.go
+grep -n 'func (s \*Service) Resume' authorization/resume.go
 ```
 
 ## 共通の準備

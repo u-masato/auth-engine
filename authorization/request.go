@@ -14,6 +14,39 @@ import (
 	"github.com/u-masato/auth-engine/storage"
 )
 
+// Request は検証済みの認可要求パラメータ。
+// エンジンが解釈するもの（redirect_uri, scope, PKCE, nonce）と、
+// Interaction App へ透過するヒント（prompt, max_age, login_hint, ...）の両方を持つ。
+type Request struct {
+	ClientID string
+
+	// RedirectURI は登録情報と照合済みの、実際に使う redirect URI。
+	RedirectURI string
+	// RedirectURIExplicit は要求に redirect_uri パラメータが含まれていたか。
+	// RFC 6749 §4.1.3 により、含まれていた場合はトークン要求でも同じ値を要求する。
+	RedirectURIExplicit bool
+
+	Scopes []string
+	State  string
+
+	// PKCE（RFC 7636）。Method は常に "S256"。
+	CodeChallenge       string
+	CodeChallengeMethod string
+
+	// OIDC Core §3.1.2.1。Nonce は ID Token に転記する。他はエンジンが解釈しない。
+	Nonce     string
+	Prompt    []string
+	MaxAge    time.Duration
+	HasMaxAge bool
+	LoginHint string
+	UILocales string
+	ACRValues string
+
+	// Resource は RFC 8707 §2.1 の resource パラメータ。Engine の設定と Client の許可範囲で
+	// 検証済みで、resource.Normalize の正規形・重複なし。要求になければ空（ADR-0008 §2、§3）。
+	Resource []string
+}
+
 // promptValues は OIDC Core §3.1.2.1 の prompt パラメータの許容値。
 var promptValues = map[string]bool{"none": true, "login": true, "consent": true, "select_account": true}
 

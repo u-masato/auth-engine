@@ -1,7 +1,7 @@
 // Package authengine は、ヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー
 // 「Protocol Engine」のルートパッケージである。
 //
-// エンジンはプロトコル処理（/authorize, /token, /userinfo, /jwks, Discovery）と
+// エンジンはプロトコル処理（/authorize, /token, /revoke, /introspect, /userinfo, /jwks, Discovery）と
 // Authorization Transaction・Grant・トークンの状態管理だけを担う。
 // ログイン・同意 UI とユーザー管理は外部の Interaction App の責務である
 // （docs/adr/0003-interaction-contract.md）。

@@ -16,7 +16,8 @@ var (
 	ErrStateConflict = errors.New("storage: state conflict")
 
 	// ErrCodeAlreadyUsed は、消費済みの Authorization Code が再提示されたことを表す。
-	// RFC 6749 §4.1.2 に従い、呼び出し側はこの Code に由来する Grant を失効させる。
+	// RFC 6749 §4.1.2 に従い、呼び出し側はこの Code から作られた Token Family を失効させる
+	// （Grant は失効させない。同じユーザーの他のセッションを巻き込まないため）。
 	ErrCodeAlreadyUsed = errors.New("storage: authorization code already used")
 
 	// ErrTokenReused は、Rotation 済みの Refresh Token が再提示されたことを表す。

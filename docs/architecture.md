@@ -43,7 +43,7 @@ flowchart LR
 
 `resourceserver` は保護される API 側に組み込むライブラリであり、`Engine` が起動するサーバーではない。デモでは認可サーバーと Interaction App を同一プロセスに置けるが、論理的な境界は保たれる。
 
-実装参照: [Engine と Config](../engine.go)、[HTTP Handler の分離](../httpapi/server.go)、[認証結果の検証](../authorization/service.go)、[デモの配線](../examples/standalone/cmd/server/main.go)。
+実装参照: [Engine と Config](../engine.go)、[HTTP Handler の分離](../httpapi/server.go)、[認証結果の検証](../authorization/complete.go)、[デモの配線](../examples/standalone/cmd/server/main.go)。
 
 <a id="packages"></a>
 ## 2. パッケージと依存関係
@@ -55,9 +55,9 @@ flowchart LR
 | ルート `authengine` | 設定検証、依存の組み立て、Store の合成 | [engine.go](../engine.go)、[store.go](../store.go) |
 | `httpapi` | HTTP 入出力、Cookie、エラー変換、2 種の Handler | [server.go](../httpapi/server.go) |
 | `client` | Profile、redirect URI、scope、クライアント解決 | [profile.go](../client/profile.go)、[store.go](../client/store.go) |
-| `authorization` | Begin / Complete / Reject / Resume、PKCE、Transaction | [service.go](../authorization/service.go) |
+| `authorization` | Begin / Complete / Reject / Resume、PKCE、Transaction | [begin.go](../authorization/begin.go)、[complete.go](../authorization/complete.go)、[resume.go](../authorization/resume.go) |
 | `grant` | Client × Subject の認可記録、統合、連携解除 | [grant.go](../grant/grant.go)、[service.go](../grant/service.go) |
-| `token` | Code 交換、Refresh Rotation、M2M、検査・失効 | [service.go](../token/service.go)、[store.go](../token/store.go) |
+| `token` | Code 交換、Refresh Rotation、M2M、検査・失効 | [service.go](../token/service.go)、[authorizationcode.go](../token/authorizationcode.go)、[store.go](../token/store.go) |
 | `oidc` | ID Token、scope に応じた UserInfo | [idtoken.go](../oidc/idtoken.go)、[userinfo.go](../oidc/userinfo.go) |
 | `keys` | 署名鍵セット、JWT 署名・検証、公開 JWKS | [keys.go](../keys/keys.go) |
 | `resource` | 静的 Resource 設定、URI 正規化、scope と形式の制約 | [resource.go](../resource/resource.go) |
@@ -167,7 +167,7 @@ sequenceDiagram
 
 書き込み順序は失敗時に再利用を許さない設計になっている。Resume は Transaction を先に消費し、その後 Grant と Code を作る。コード交換も Code を先に消費し、その後の PKCE 検証などで失敗しても未消費には戻さない。途中障害時には、同じ要求の再試行ではなく認可のやり直しが必要になる場合がある。
 
-実装参照: [HTTP 認可処理](../httpapi/authorize.go)、[Begin / Complete / Reject / Resume](../authorization/service.go)、[結合 Cookie](../httpapi/cookie.go)、[exchangeCode](../token/service.go)。
+実装参照: [HTTP 認可処理](../httpapi/authorize.go)、[Begin](../authorization/begin.go)、[Complete / Reject](../authorization/complete.go)、[Resume](../authorization/resume.go)、[結合 Cookie](../httpapi/cookie.go)、[exchangeCode](../token/authorizationcode.go)。
 
 <a id="state-model"></a>
 ## 6. 状態とデータモデル
@@ -208,7 +208,7 @@ flowchart LR
 
 Grant の scope が後の同意で増えても、既存 Family の scope が自動的に増えるわけではない。UserInfo は Grant の最新 Claims スナップショットを読み、提示された Access Token の scope で絞る。ID Token は認証情報を表し、現在の Code フローでは `profile` / `email` などの属性は UserInfo から返す。
 
-実装参照: [Transaction と Code](../authorization/transaction.go)、[Grant.Merge](../grant/grant.go)、[トークンモデル](../token/token.go)、[UserInfo](../oidc/userinfo.go)、[ID Token](../oidc/idtoken.go)。
+実装参照: [Transaction](../authorization/transaction.go)、[Code](../authorization/code.go)、[Grant.Merge](../grant/grant.go)、[トークンモデル](../token/token.go)、[UserInfo](../oidc/userinfo.go)、[ID Token](../oidc/idtoken.go)。
 
 <a id="token-lifecycle"></a>
 ## 7. トークン発行・更新・失効
@@ -251,7 +251,7 @@ Code 消費と Family 作成は別操作なので、同時交換の敗者によ�
 
 JWT Access Token もハッシュと状態を Store に保存する。`typ: at+jwt`、Resource を指す `aud` を持ち、Client を `aud` とする ID Token とは用途が異なる。resource を指定しない場合は Opaque となる。
 
-実装参照: [Profile](../client/profile.go)、[M2M](../token/clientcredentials.go)、[Rotation](../token/refresh.go)、[Revoke](../token/revoke.go)、[Introspection](../token/introspect.go)、[JWT 発行](../token/jwt.go)、[Code 再利用の制約](../token/service.go)。
+実装参照: [Profile](../client/profile.go)、[M2M](../token/clientcredentials.go)、[Rotation](../token/refresh.go)、[Revoke](../token/revoke.go)、[Introspection](../token/introspect.go)、[JWT 発行](../token/jwt.go)、[Code 再利用の制約](../token/authorizationcode.go)。
 
 <a id="mcp"></a>
 ## 8. MCP と Resource Server
@@ -331,8 +331,8 @@ Adapter の互換性は `storage/storagetest.Run` の共通契約テストで検
 | 理解したいこと | 推奨する読む順序 |
 | --- | --- |
 | 全体の配線 | [engine.go](../engine.go) → [httpapi/server.go](../httpapi/server.go) → [HTTP の実行可能な Example](../httpapi/example_test.go) |
-| 認可コードができるまで | [request.go](../authorization/request.go) → [authorization/service.go](../authorization/service.go) → [transaction.go](../authorization/transaction.go) |
-| トークンのライフサイクル | [token/service.go](../token/service.go) → [refresh.go](../token/refresh.go) → [revoke.go](../token/revoke.go) |
+| 認可コードができるまで | [request.go](../authorization/request.go) → [begin.go](../authorization/begin.go) → [complete.go](../authorization/complete.go) → [resume.go](../authorization/resume.go)（状態は [transaction.go](../authorization/transaction.go)） |
+| トークンのライフサイクル | [token/service.go](../token/service.go) → [authorizationcode.go](../token/authorizationcode.go) → [refresh.go](../token/refresh.go) → [revoke.go](../token/revoke.go) |
 | DB Adapter の追加 | [store.go](../store.go) → [契約テスト](../storage/storagetest/storagetest.go) → [既存 SQLite 実装](../adapters/sqlite/tokens.go) |
 | MCP の実装 | [client/mcp.go](../client/mcp.go) → [cimd/resolver.go](../cimd/resolver.go) → [resourceserver/protector.go](../resourceserver/protector.go) |
 

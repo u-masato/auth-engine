@@ -33,8 +33,8 @@ type Config struct {
 	// Store は永続化 Adapter。必須。
 	Store Store
 
-	// Keys は ID Token の署名鍵セット。必須。RS256 の署名鍵を含むこと
-	// （OIDC Core §15.1、Client の既定アルゴリズム）。
+	// Keys は ID Token と JWT Access Token（RFC 9068。JWT 形式の resource を設定したとき）の署名鍵セット。
+	// 必須。RS256 の署名鍵を含むこと（OIDC Core §15.1、Client の既定アルゴリズム）。
 	Keys *keys.Set
 
 	// Resources は Resource Server（RFC 8707 の resource indicator）の静的設定（ADR-0008 §1）。
@@ -97,13 +97,13 @@ func New(cfg Config) (*Engine, error) {
 		return nil, errors.New("authengine: Store is required")
 	}
 	if cfg.TransactionTTL < 0 || cfg.TransactionTTL > authorization.MaxTransactionTTL {
-		return nil, fmt.Errorf("authengine: TransactionTTL must be within (0, %s]", authorization.MaxTransactionTTL)
+		return nil, fmt.Errorf("authengine: TransactionTTL must be within [0, %s] (0 means the default)", authorization.MaxTransactionTTL)
 	}
 	if cfg.CodeTTL < 0 || cfg.CodeTTL > authorization.MaxCodeTTL {
-		return nil, fmt.Errorf("authengine: CodeTTL must be within (0, %s]", authorization.MaxCodeTTL)
+		return nil, fmt.Errorf("authengine: CodeTTL must be within [0, %s] (0 means the default)", authorization.MaxCodeTTL)
 	}
-	if cfg.IDTokenTTL < 0 || cfg.IDTokenTTL > 24*time.Hour {
-		return nil, errors.New("authengine: IDTokenTTL must be within (0, 24h]")
+	if cfg.IDTokenTTL < 0 || cfg.IDTokenTTL > oidc.MaxIDTokenTTL {
+		return nil, fmt.Errorf("authengine: IDTokenTTL must be within [0, %s] (0 means the default)", oidc.MaxIDTokenTTL)
 	}
 	if cfg.RefreshTokenTTL < 0 || cfg.RefreshTokenIdleTTL < 0 {
 		return nil, errors.New("authengine: RefreshTokenTTL and RefreshTokenIdleTTL must not be negative")

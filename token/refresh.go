@@ -90,8 +90,8 @@ func (s *Service) refresh(ctx context.Context, c *client.Client, req Request) (*
 
 	res := &Response{
 		AccessToken:  accessPlain,
-		TokenType:    "Bearer",
-		ExpiresIn:    int64(access.ExpiresAt.Sub(now).Seconds()),
+		TokenType:    tokenTypeBearer,
+		ExpiresIn:    expiresIn(access, now),
 		Scope:        strings.Join(scopes, " "),
 		RefreshToken: nextPlain,
 	}
