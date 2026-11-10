@@ -35,6 +35,9 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		fn   func(t *testing.T, s authengine.Store)
 	}{
 		{"Client", testClient},
+		{"ClientUpdate", testClientUpdate},
+		{"ClientDeleteCascades", testClientDeleteCascades},
+		{"ClientDeleteVersusIssue", testClientDeleteVersusIssue},
 		{"Transaction", testTransaction},
 		{"TransactionConcurrentComplete", testTransactionConcurrentComplete},
 		{"AuthorizationCode", testAuthorizationCode},
@@ -215,6 +218,189 @@ func testClient(t *testing.T, s authengine.Store) {
 	}
 	if err := gotMCP.Validate(); err != nil {
 		t.Fatalf("restored mcp client must validate: %v", err)
+	}
+}
+
+func testClientUpdate(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	c := newWebClient(t, "c1")
+	if err := s.CreateClient(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	cur, err := s.GetClient(ctx, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cur.UpdateParams()
+	p.Name = "Renamed"
+	p.RedirectURIs = []string{"https://app.example.com/cb2", "https://app.example.com/cb3"}
+	p.Scopes = []string{"openid"}
+	p.Resources = nil // 制限なしに戻す
+	p.AccessTokenTTL = 5 * time.Minute
+	p.IDTokenAlg = client.AlgES256
+	next, err := cur.Update(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateClient(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetClient(ctx, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Renamed" || !slices.Equal(got.RedirectURIs, p.RedirectURIs) || !slices.Equal(got.Scopes, p.Scopes) ||
+		len(got.Resources) != 0 || got.AccessTokenTTL != 5*time.Minute || got.IDTokenAlg != client.AlgES256 ||
+		got.Profile != client.ProfileWeb || got.SecretHash != c.SecretHash || !got.CreatedAt.Equal(c.CreatedAt) {
+		t.Fatalf("updated client mismatch:\n got %+v\nwant %+v", got, next)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("updated client must validate: %v", err)
+	}
+
+	// CreatedAt は保存済みの値が残る（別の時刻で組み立てた同じ ID の Client で置き換えても変わらない）
+	later, _, err := client.NewWeb(client.WebParams{ID: "c1", Name: "Later", RedirectURIs: []string{"https://app.example.com/cb"},
+		Scopes: []string{"openid"}}, base.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateClient(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetClient(ctx, "c1"); err != nil || got.Name != "Later" || !got.CreatedAt.Equal(c.CreatedAt) {
+		t.Fatalf("created_at must be kept: %+v, %v", got, err)
+	}
+
+	// Profile の変更は拒否し、何も変えない（ADR-0004 §4）
+	native, err := client.NewNative(client.NativeParams{ID: "c1", Name: "Native", RedirectURIs: []string{"http://127.0.0.1/cb"}, Scopes: []string{"openid"}}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, s.UpdateClient(ctx, native), storage.ErrStateConflict, "profile change")
+	if got, err := s.GetClient(ctx, "c1"); err != nil || got.Profile != client.ProfileWeb || got.Name != "Later" || got.SecretHash != later.SecretHash {
+		t.Fatalf("rejected update must not change the client: %+v, %v", got, err)
+	}
+
+	wantErr(t, s.UpdateClient(ctx, newWebClient(t, "missing")), storage.ErrNotFound, "update missing client")
+	if _, err := s.GetClient(ctx, "missing"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("update must not create a client: %v", err)
+	}
+}
+
+func testClientDeleteCascades(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	if err := s.CreateClient(ctx, newWebClient(t, "c1")); err != nil {
+		t.Fatal(err)
+	}
+	g, f, at, rt := seedGrantWithTokens(t, s, "1") // Client c1 の Grant
+	code := newCode("h1", g.ID, "f-unused")
+	if err := s.CreateAuthorizationCode(ctx, code); err != nil {
+		t.Fatal(err)
+	}
+	// 別 Client は巻き込まれない
+	if err := s.CreateClient(ctx, newWebClient(t, "c9")); err != nil {
+		t.Fatal(err)
+	}
+	_, _, atOther, _ := seedGrantWithTokens(t, s, "9")
+
+	now := base.Add(time.Minute)
+	if err := s.DeleteClient(ctx, "c1", now); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.GetClient(ctx, "c1")
+	wantErr(t, err, storage.ErrNotFound, "deleted client")
+
+	gg, err := s.GetGrant(ctx, g.ID)
+	if err != nil || gg.Active() || !gg.RevokedAt.Equal(now) {
+		t.Fatalf("grant must be revoked (and kept) with client: %+v, %v", gg, err)
+	}
+	tok, _, err := s.LookupAccessToken(ctx, at.Hash)
+	if err != nil || tok.Status != token.AccessRevoked || !tok.RevokedAt.Equal(now) {
+		t.Fatalf("access token must be revoked with client: %+v, %v", tok, err)
+	}
+	if fam, err := s.GetTokenFamily(ctx, f.ID); err != nil || fam.Active() {
+		t.Fatalf("family must be revoked with client: %+v, %v", fam, err)
+	}
+	if r, err := s.LookupRefreshToken(ctx, rt.Hash); err != nil || r.Status != token.RefreshRevoked {
+		t.Fatalf("refresh token must be revoked with client: %+v, %v", r, err)
+	}
+	wantErr(t, s.RotateRefreshToken(ctx, rt.Hash, newRefresh("rt-next", f.ID), newAccess("at-next", f.ID, g.ID), now),
+		storage.ErrFamilyRevoked, "rotate after client delete")
+	wantErr(t, s.IssueTokens(ctx, newFamily("f-new", g.ID), newAccess("at-new", "f-new", g.ID), nil),
+		storage.ErrGrantRevoked, "issue after client delete")
+	_, err = s.ConsumeAuthorizationCode(ctx, code.Hash, now)
+	wantErr(t, err, storage.ErrNotFound, "code of deleted client")
+
+	other, og, err := s.LookupAccessToken(ctx, atOther.Hash)
+	if err != nil || other.Status != token.AccessActive || !og.Active() {
+		t.Fatalf("other client must be untouched: %+v, %v", other, err)
+	}
+
+	// 物理削除なので同じ ID で作り直せる。失効済み Grant は同意をやり直すまで active に戻らない。
+	wantErr(t, s.DeleteClient(ctx, "c1", now), storage.ErrNotFound, "delete twice")
+	if err := s.CreateClient(ctx, newWebClient(t, "c1")); err != nil {
+		t.Fatalf("re-create after delete: %v", err)
+	}
+	if gg, err := s.FindGrant(ctx, "c1", "alice"); err != nil || gg.Active() {
+		t.Fatalf("grant must stay revoked after re-create: %+v, %v", gg, err)
+	}
+
+	// Client がなければ、同じ client_id の Grant が残っていても何も変えない
+	ghost, err := s.UpsertGrant(ctx, newGrant("g-ghost", "ghost", "alice", "openid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, s.DeleteClient(ctx, "ghost", now), storage.ErrNotFound, "delete missing client")
+	if gg, err := s.GetGrant(ctx, ghost.ID); err != nil || !gg.Active() {
+		t.Fatalf("failed delete must not revoke grants: %+v, %v", gg, err)
+	}
+}
+
+func testClientDeleteVersusIssue(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	if err := s.CreateClient(ctx, newWebClient(t, "c1")); err != nil {
+		t.Fatal(err)
+	}
+	g, err := s.UpsertGrant(ctx, newGrant("g1", "c1", "alice", "openid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 競合: 削除と発行を同時に走らせる。発行が成功したなら、そのトークンは失効済みでなければならない。
+	var wg sync.WaitGroup
+	issueErrs := make(chan error, concurrency)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.DeleteClient(ctx, "c1", base); err != nil {
+			t.Error(err)
+		}
+	}()
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			fid := fmt.Sprint("f", i)
+			issueErrs <- s.IssueTokens(ctx, newFamily(fid, g.ID), newAccess(fmt.Sprint("at", i), fid, g.ID), nil)
+		}(i)
+	}
+	wg.Wait()
+	close(issueErrs)
+	for err := range issueErrs {
+		if err != nil && !errors.Is(err, storage.ErrGrantRevoked) {
+			t.Fatalf("unexpected issue error: %v", err)
+		}
+	}
+	for i := 0; i < concurrency; i++ {
+		tok, gg, err := s.LookupAccessToken(ctx, fmt.Sprint("at", i))
+		if errors.Is(err, storage.ErrNotFound) {
+			continue // 発行が負けた
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tok.Status != token.AccessRevoked || gg.Active() {
+			t.Fatalf("token issued concurrently with client delete must end up revoked: %+v grant=%+v", tok, gg)
+		}
 	}
 }
 

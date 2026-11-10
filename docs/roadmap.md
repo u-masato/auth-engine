@@ -95,7 +95,7 @@
 
 - JWT 形式の Access Token（RFC 9068）、`resource` の検証（M3）
 - `private_key_jwt`、PAR、DPoP、Token Exchange（M4）
-- Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）
+- Client の更新・削除 API（必要になった時点で `UpdateClient` を Store に追加する）→ 2026-10-25 に issue #1 で実装した。`client.Store` に `UpdateClient(ctx, c)` と `DeleteClient(ctx, id, now)` を追加（ADR-0005 §2）。issue の案 `DeleteClient(ctx, id)` との差分: 失効時刻を他の失効操作と同じく引数で受けるため `now` を足した。削除時は Grant・Token Family・トークンの失効に加え、その Client の Authorization Code も削除する（同じ ID で作り直して再同意したとき、旧 Code が交換できないように）。更新の入口は遷移メソッド `Client.Update`（開放項目だけを受け取り、`Validate` を通す）
 - Basic OP 認定（PKCE 必須を維持するため目標にしない。必要になれば新 Profile を追加して対応する。[conformance.md](conformance.md)「PKCE 必須との非互換」の判断）
 - Interaction API での連携解除（`DELETE /grants`）。M2 では Go API `Engine.Grants.Revoke` のみ
 

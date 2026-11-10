@@ -193,15 +193,8 @@ func (c *Client) finish(presented string) (Secret, error) {
 		}
 		c.ID = id
 	}
-	if r.issuesIDToken && c.IDTokenAlg == "" {
-		c.IDTokenAlg = AlgRS256
-	}
-	for i, res := range c.Resources {
-		n, err := resource.Normalize(res)
-		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrInvalid, err)
-		}
-		c.Resources[i] = n
+	if err := c.applyDefaults(); err != nil {
+		return "", err
 	}
 
 	var secret Secret
@@ -227,6 +220,22 @@ func (c *Client) finish(presented string) (Secret, error) {
 		return "", err
 	}
 	return secret, nil
+}
+
+// applyDefaults は ID Token 署名アルゴリズムの既定値を補い、Resources を正規形にそろえる。
+// 構築（finish）と更新（Update）で共通に使う。
+func (c *Client) applyDefaults() error {
+	if c.Profile.rules().issuesIDToken && c.IDTokenAlg == "" {
+		c.IDTokenAlg = AlgRS256
+	}
+	for i, res := range c.Resources {
+		n, err := resource.Normalize(res)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+		c.Resources[i] = n
+	}
+	return nil
 }
 
 // Validate は Client が Profile の規則を満たすかを検証する。

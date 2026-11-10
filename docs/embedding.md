@@ -94,7 +94,9 @@ Client は Profile ごとのコンストラクタで作り、`Store.CreateClient
 | サービス間通信、Introspection を呼ぶ Resource Server | `client.NewMachine` | [`ExampleNewMachine`](../client/example_test.go) |
 
 - **シークレットは作成時に 1 度だけ平文で返る。** Store に残るのは SHA-256 ハッシュだけなので、後から取り出すことはできない。ログに出さずに Client へ渡す。
-- **登録用の HTTP API はない。** Store に更新の操作もないので、設定を変えるときは Client を作り直す。登録の手段は組み込む側で用意する。例として、デモサーバーの `-clients` オプションは JSON ファイルから登録する（[main.go](../examples/standalone/cmd/server/main.go) の `registerClientsFromFile`）。開発者コンソールは画面から登録する。
+- **登録用の HTTP API はない。** 登録の手段は組み込む側で用意する。例として、デモサーバーの `-clients` オプションは JSON ファイルから登録する（[main.go](../examples/standalone/cmd/server/main.go) の `registerClientsFromFile`）。開発者コンソールは画面から登録する。
+- **登録後の変更は `Client.Update` と `Store.UpdateClient` で行う。** 変えられるのは表示名・redirect URI・scope・resource・有効期間・ID Token の署名アルゴリズムなど ADR-0004 §2 の項目だけで、Profile は変えられない（[`ExampleClient_Update`](../client/example_test.go)）。シークレットのローテーションはないので、漏えいしたら Client を作り直す。
+- **`Store.DeleteClient` で削除すると、その Client の Grant とトークンはすべて失効する。** 同じ ID で作り直しても、ユーザーは同意をやり直す必要がある。ただし削除の直前に同意が済んだ認可要求が削除後に戻ってくると Grant が active に戻るので、同じ ID の作り直しは Transaction の有効期限（`Config.TransactionTTL`、既定 10 分）が過ぎてから行う。URL 形式の `client_id`（事前登録した MCP Client）を削除すると、以後は CIMD で解決されるので、接続を止める手段にはならない（止めるには `cimd.TrustPolicy` で拒否する）。
 - **ブラウザ上の JavaScript（SPA）から `/token` を直接呼ぶ構成には対応していない。** エンジンは CORS ヘッダーを返さない。SPA はバックエンド（BFF）を Web Profile の Client として登録し、トークンはサーバー側に置く。
 - PKCE を実装していないクライアントは接続できない。これは意図した制約である。
 

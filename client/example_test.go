@@ -101,3 +101,45 @@ func ExampleNewMCP() {
 	// profile=mcp public=true pkce=true authorization_code=true refresh_token=true client_credentials=false
 	// requires resource: true
 }
+
+// ExampleClient_Update は登録済みの Client の redirect URI を差し替える。
+// 変えられるのは開放項目（ADR-0004 §2）だけで、ID・Profile・シークレットはそのまま残る。
+func ExampleClient_Update() {
+	ctx := context.Background()
+	store := memory.New()
+	c, _, err := client.NewWeb(client.WebParams{
+		ID:           "web-app",
+		Name:         "Example Web App",
+		RedirectURIs: []string{"https://app.example.com/callback"},
+		Scopes:       []string{"openid", "profile"},
+	}, time.Now())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := store.CreateClient(ctx, c); err != nil {
+		log.Fatal(err)
+	}
+
+	cur, err := store.GetClient(ctx, "web-app")
+	if err != nil {
+		log.Fatal(err)
+	}
+	p := cur.UpdateParams() // 現在値から変えたい項目だけを書き換える
+	p.RedirectURIs = []string{"https://app.example.com/oauth/callback"}
+	next, err := cur.Update(p) // Profile の規則で検証する
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := store.UpdateClient(ctx, next); err != nil {
+		log.Fatal(err)
+	}
+
+	got, err := store.GetClient(ctx, "web-app")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(got.Profile, got.RedirectURIs, got.SecretHash == c.SecretHash)
+
+	// Output:
+	// web [https://app.example.com/oauth/callback] true
+}
