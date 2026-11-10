@@ -13,7 +13,7 @@ go run ./cmd/server -db ./auth.db
 | 公開エンドポイント | `:8080` | `/authorize`, `/token`, `/userinfo`, `/revoke`, `/introspect`, `/jwks`, `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` |
 | Interaction API | `127.0.0.1:8081` | Interaction App 専用。外部に公開しない |
 | デモ Interaction App | `:8082` | `/login`。ユーザー名を入れて承認するだけの画面（パスワード検証なし） |
-| 開発者コンソール | `127.0.0.1:8083` | Client の登録とフローの手動確認（下記）。`-console-addr ""` で無効 |
+| 開発者コンソール | `127.0.0.1:8083` | Client の一覧・登録・編集・削除とフローの手動確認（下記）。`-console-addr ""` で無効 |
 
 初回起動時に署名鍵セット（RS256 と ES256）を生成して `-keys`（既定 `keys.json`、0600）に保存し、Native クライアント `demo-cli`（redirect URI は `http://127.0.0.1/callback`、ポートは任意）を登録する。
 `-auto-approve` を付けると画面を出さず `demo-user` として全 scope を承認する（テスト・Conformance Suite 用）。
@@ -28,14 +28,16 @@ CIMD（URL 形式の `client_id` を Client ID Metadata Document で解決する
 
 `http://127.0.0.1:8083` を開くと、ブラウザだけで次を確認できる。
 
-1. **Client の登録** — Profile（web / native / machine）、redirect URI、scope を入れて Store に登録する。Web / Machine の Client Secret は登録直後の画面に出る。既定の redirect URI はコンソール自身の `http://127.0.0.1:8083/callback`
+1. **Client の管理** — トップは Store に登録されている Client の一覧（`Store.ListClients`、client_id の昇順、50 件ずつ）。「クライアントを登録」で Profile（web / native / machine）、redirect URI、scope、resource の上限、Access Token の有効期間を入れて登録する。Web / Machine の Client Secret は登録直後の画面に出る。既定の redirect URI はコンソール自身の `http://127.0.0.1:8083/callback`。詳細画面は「登録後も変えられる項目」と「Profile が決める項目」を分けて表示し、編集（`Client.Update` + `Store.UpdateClient`）と削除（`Store.DeleteClient`。確認欄に client_id を入力する。Grant とトークンも失効する）ができる
 2. **認可要求** — 送るパラメータ（PKCE の `code_challenge`、`nonce`、任意の `prompt` / `login_hint` / `max_age`）を表で見てから認可エンドポイントへ進む
 3. **コールバック以降** — `state` と `iss`（RFC 9207）の検証、Code の交換、ID Token の署名（公開 JWKS）と `iss` / `aud` / `exp` / `nonce` の検証を段階ごとに表示する
 4. **トークン操作** — UserInfo、Refresh（Rotation の確認）、Revoke、Introspect をボタンで実行する。Machine Client は client_credentials でトークンを取る
 
 各段階に対応する RFC / OIDC の節番号を出す。ログイン画面は Cookie セッションを持つので、2 回目以降に画面を見たいときは `prompt=login` で開始する。
 
-コンソールは認証なしで Store に書き込む開発用の道具なので、loopback にだけ bind する。フローの状態とコンソールで登録した Client の Secret はメモリにだけ持ち、再起動で消える（Client 自体は DB に残る）。Store に更新・一覧の操作はないため、登録内容を変えるときは別の client_id で登録するか DB を作り直す。
+コンソールは認証なしで Store に書き込む開発用の道具なので、loopback にだけ bind する。他のサイトからブラウザ経由で書き込まれないよう、状態を変える要求は同一オリジンに限っている（`http.CrossOriginProtection`）。フローの状態と Client Secret の平文はメモリにだけ持ち、再起動で消える（Client 自体は DB に残る）。
+
+管理画面を自分で作るときの参考にもなる。エンジンは管理用の HTTP API を持たず、一覧・登録・変更・削除は Go API（`client` のコンストラクタ、`Client.Update`、`client.Store`）で組む。本番では運用者の認証と操作の監査ログを足すこと。シークレットの再発行と、Client ごとの Grant（利用中のユーザー）の一覧はエンジンにまだない。
 
 ## クライアントでフローを実行
 
@@ -75,7 +77,7 @@ go run ./cmd/cli-client -client-id-url https://localhost:8444/demo-cli.json -mcp
 
 - `loginapp/` — Interaction API を呼ぶ Interaction App の最小実装。E2E テストからも使う。MCP Client ではホスト名表示と localhost の注意書きを出す
 - `oauthclient/` — Authorization Code + PKCE、Client Credentials、loopback redirect、RFC 8414 Discovery、`iss` 検証、Refresh、Revocation、Introspection、UserInfo、`resource`（RFC 8707）、Resource Server の発見（RFC 9728 の `WWW-Authenticate` と Protected Resource Metadata）を行う最小クライアント
-- `console/` — 開発者コンソール。Client の登録（Store に直接書く運用者の操作）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
+- `console/` — 開発者コンソール（Client 管理ダッシュボード）。Client の一覧・登録・編集・削除（Store を Go API で操作する運用者の画面）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
 - `cmd/server/` — 上記を配線して起動する。`-resources` と CIMD の設定もここ
 - `cmd/cli-client/` — `oauthclient` を使う CLI。`-client-id-url` と `-mcp` で MCP クライアントになる
 - `cmd/mcp-server/` — `resourceserver` を組み込んだデモ MCP サーバー（Resource Server）。`mcp.go` が最小の MCP プロトコル

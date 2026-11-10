@@ -6,7 +6,7 @@
 //   - 公開エンドポイント（既定 :8080）: /authorize, /token, /.well-known/oauth-authorization-server
 //   - Interaction API（既定 127.0.0.1:8081）: Interaction App だけが使う。外部に公開しない
 //   - デモ Interaction App（既定 :8082）: /login
-//   - 開発者コンソール（既定 127.0.0.1:8083）: Client の登録とフローの手動確認。-console-addr "" で無効
+//   - 開発者コンソール（既定 127.0.0.1:8083）: Client の一覧・登録・編集・削除とフローの手動確認。-console-addr "" で無効
 //
 // 初回起動時にデモ用クライアント demo-cli（Native、loopback redirect）を登録する。
 // cmd/cli-client がこのクライアントでフローを実行できる。
@@ -113,16 +113,16 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	if err != nil {
 		return err
 	}
-	known, err := registerDemoClients(ctx, store, logger)
-	if err != nil {
+	if err := registerDemoClients(ctx, store, logger); err != nil {
 		return err
 	}
+	// secrets は起動時に分かっている Client Secret（-clients の JSON に書いたものと、ここで生成したもの）。
+	// コンソールの開始フォームに入れておくためだけに使う。
+	secrets := map[string]string{}
 	if o.clientsPath != "" {
-		fromFile, err := registerClientsFromFile(ctx, store, logger, o.clientsPath)
-		if err != nil {
+		if secrets, err = registerClientsFromFile(ctx, store, logger, o.clientsPath); err != nil {
 			return err
 		}
-		known = append(known, fromFile...)
 	}
 
 	// Interaction API のトークンはプロセス内で生成し、同梱の loginapp にだけ渡す。
@@ -157,7 +157,7 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	}
 	names := []string{"public", "interaction", "login"}
 	if o.consoleAddr != "" {
-		con, err := console.New(console.Config{Issuer: o.issuer, BaseURL: o.consoleURL, Store: store, Known: known, Logger: logger})
+		con, err := console.New(console.Config{Issuer: o.issuer, BaseURL: o.consoleURL, Store: store, Secrets: secrets, Logger: logger})
 		if err != nil {
 			return err
 		}
@@ -193,14 +193,13 @@ func run(ctx context.Context, logger *slog.Logger, o options) error {
 	return nil
 }
 
-// registerDemoClients はデモ用の Native クライアントを初回だけ登録し、コンソールに出す一覧を返す。
-func registerDemoClients(ctx context.Context, store authengine.Store, logger *slog.Logger) ([]console.KnownClient, error) {
+// registerDemoClients はデモ用の Native クライアントを初回だけ登録する。
+func registerDemoClients(ctx context.Context, store authengine.Store, logger *slog.Logger) error {
 	const id = "demo-cli"
-	known := []console.KnownClient{{ID: id}}
 	if _, err := store.GetClient(ctx, id); err == nil {
-		return known, nil
+		return nil
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		return nil, err
+		return err
 	}
 	c, err := client.NewNative(client.NativeParams{
 		ID:           id,
@@ -209,13 +208,13 @@ func registerDemoClients(ctx context.Context, store authengine.Store, logger *sl
 		Scopes:       []string{"openid", "profile", "email"},
 	}, time.Now())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := store.CreateClient(ctx, c); err != nil {
-		return nil, err
+		return err
 	}
 	logger.Info("registered demo client", "client_id", id, "profile", c.Profile)
-	return known, nil
+	return nil
 }
 
 // clientSpec は -clients で読むクライアント定義。
@@ -232,9 +231,10 @@ type clientSpec struct {
 	AllowInsecureLocalhost bool     `json:"allow_insecure_localhost"`
 }
 
-// registerClientsFromFile は JSON ファイルのクライアントを登録し、コンソールに出す一覧を返す。
-// 既に同じ client_id があれば変更せずに飛ばす（Store に更新操作はない。変えたいときは DB を作り直す）。
-func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) ([]console.KnownClient, error) {
+// registerClientsFromFile は JSON ファイルのクライアントを登録し、分かっている Client Secret（client_id → 平文）を返す。
+// 既に同じ client_id があれば変更せずに飛ばす（起動のたびに登録内容を上書きしない。変えるときはコンソールの
+// 編集画面か Client.Update + Store.UpdateClient を使う）。
+func registerClientsFromFile(ctx context.Context, store authengine.Store, logger *slog.Logger, path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read clients %s: %w", path, err)
@@ -244,11 +244,13 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 		return nil, fmt.Errorf("parse clients %s: %w", path, err)
 	}
 	now := time.Now()
-	var known []console.KnownClient
+	secrets := map[string]string{}
 	for _, sp := range specs {
 		if _, err := store.GetClient(ctx, sp.ClientID); err == nil {
 			logger.Info("client already registered", "client_id", sp.ClientID)
-			known = append(known, console.KnownClient{ID: sp.ClientID, Secret: sp.Secret})
+			if sp.Secret != "" {
+				secrets[sp.ClientID] = sp.Secret
+			}
 			continue
 		} else if !errors.Is(err, storage.ErrNotFound) {
 			return nil, err
@@ -285,9 +287,11 @@ func registerClientsFromFile(ctx context.Context, store authengine.Store, logger
 			attrs = append(attrs, "generated_secret", string(secret)) // 1 回しか得られないので表示する
 		}
 		logger.Info("registered client from file", attrs...)
-		known = append(known, console.KnownClient{ID: c.ID, Secret: string(secret)})
+		if secret != "" {
+			secrets[c.ID] = string(secret)
+		}
 	}
-	return known, nil
+	return secrets, nil
 }
 
 // resourceSpec は -resources で読む Resource Server の定義（resource.Resource と同じ項目）。
