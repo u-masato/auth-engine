@@ -281,6 +281,26 @@ func (s *Store) ListGrantsBySubject(_ context.Context, subject string) ([]*grant
 	return out, nil
 }
 
+func (s *Store) ListGrantsByClient(_ context.Context, clientID, after string, limit int) ([]*grant.Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	matched := []*grant.Grant{}
+	for _, g := range s.grants {
+		if g.ClientID == clientID && g.Subject > after {
+			matched = append(matched, g)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Subject < matched[j].Subject })
+	out := []*grant.Grant{}
+	for _, g := range matched {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, clone(g))
+	}
+	return out, nil
+}
+
 func (s *Store) RevokeGrant(_ context.Context, id string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

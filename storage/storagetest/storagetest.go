@@ -45,6 +45,7 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		{"AuthorizationCode", testAuthorizationCode},
 		{"AuthorizationCodeConcurrentConsume", testCodeConcurrentConsume},
 		{"Grant", testGrant},
+		{"GrantListByClient", testGrantListByClient},
 		{"GrantRevokeCascades", testGrantRevokeCascades},
 		{"IssueTokens", testIssueTokens},
 		{"RotateRefreshToken", testRotateRefreshToken},
@@ -834,6 +835,89 @@ func testGrant(t *testing.T, s authengine.Store) {
 	}
 	if revived.ID != "g1" || !revived.Active() || !slices.Equal(revived.Scopes, []string{"email"}) || !revived.RevokedAt.IsZero() {
 		t.Fatalf("revived grant must drop old scopes and clear revocation: %+v", revived)
+	}
+}
+
+// testGrantListByClient は ListGrantsByClient の順序（Subject のバイト列としての昇順）、キーセットページング、
+// 他の Client を含まないこと、失効済みも含むことを確かめる。Subject の選び方は testClientList と同じ理由。
+func testGrantListByClient(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	list := func(clientID, after string, limit int) []string {
+		t.Helper()
+		gs, err := s.ListGrantsByClient(ctx, clientID, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gs == nil {
+			t.Fatal("ListGrantsByClient must return an empty slice, not nil")
+		}
+		out := make([]string, 0, len(gs))
+		for _, g := range gs {
+			if g.ClientID != clientID {
+				t.Fatalf("grant of another client in the list: %+v", g)
+			}
+			out = append(out, g.Subject)
+		}
+		return out
+	}
+	if got := list("c1", "", 10); len(got) != 0 {
+		t.Fatalf("empty store: %v", got)
+	}
+
+	// 作成順は Subject の順と変える。バイト列の昇順は "B" < "_x" < "a" < "b" < "c-1"。
+	for i, sub := range []string{"b", "_x", "c-1", "B", "a"} {
+		if _, err := s.UpsertGrant(ctx, newGrant(fmt.Sprintf("g%d", i), "c1", sub, "openid")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 同じ Subject でも他の Client の Grant は含めない
+	if _, err := s.UpsertGrant(ctx, newGrant("g-other", "c2", "a", "openid")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"B", "_x", "a", "b", "c-1"}
+	if got := list("c1", "", 10); !slices.Equal(got, want) {
+		t.Fatalf("order: got %v, want %v", got, want)
+	}
+	if got := list("c1", "", 2); !slices.Equal(got, want[:2]) {
+		t.Fatalf("first page: got %v, want %v", got, want[:2])
+	}
+	if got := list("c1", "_x", 2); !slices.Equal(got, want[2:4]) {
+		t.Fatalf("second page: got %v, want %v", got, want[2:4])
+	}
+	if got := list("c1", "b", 2); !slices.Equal(got, want[4:]) {
+		t.Fatalf("last page: got %v, want %v", got, want[4:])
+	}
+	if got := list("c1", "c-1", 2); len(got) != 0 {
+		t.Fatalf("past the end: %v", got)
+	}
+	// after は存在する Subject でなくてもよい
+	if got := list("c1", "a0", 10); !slices.Equal(got, want[3:]) {
+		t.Fatalf("after a missing subject: got %v, want %v", got, want[3:])
+	}
+	if got := list("c1", "", 0); len(got) != 0 {
+		t.Fatalf("limit 0: %v", got)
+	}
+	if got := list("c2", "", 10); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("other client: %v", got)
+	}
+	if got := list("nobody", "", 10); len(got) != 0 {
+		t.Fatalf("unknown client: %v", got)
+	}
+
+	// 失効済みも含み、内容は GetGrant と同じものが戻る
+	if err := s.RevokeGrant(ctx, "g4", base.Add(time.Hour)); err != nil { // Subject "a"
+		t.Fatal(err)
+	}
+	gs, err := s.ListGrantsByClient(ctx, "c1", "_x", 1)
+	if err != nil || len(gs) != 1 {
+		t.Fatalf("list one: %+v, %v", gs, err)
+	}
+	if g := gs[0]; g.ID != "g4" || g.Active() || !g.RevokedAt.Equal(base.Add(time.Hour)) || !slices.Equal(g.Scopes, []string{"openid"}) ||
+		g.Claims["name"] != "Alice" || !g.CreatedAt.Equal(base) {
+		t.Fatalf("listed grant must carry the stored content, including revocation: %+v", g)
+	}
+	if got := list("c1", "", 10); !slices.Equal(got, want) {
+		t.Fatalf("revoked grants must stay in the list: %v", got)
 	}
 }
 

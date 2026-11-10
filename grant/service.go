@@ -13,7 +13,8 @@ import (
 var ErrNotFound = errors.New("grant: not found")
 
 // Service は Grant の管理操作（ADR-0006 §5）。プロトコル上の対応物はなく、Go API と
-// Interaction API（GET /grants、DELETE /grants）から使う。フィールドは Engine が配線する。
+// Interaction API（GET /grants、DELETE /grants）から使う。ListByClient は運用者向けで、
+// Interaction API には出さない（利用者本人の操作ではないため）。フィールドは Engine が配線する。
 type Service struct {
 	Store Store
 	Clock clock.Clock
@@ -49,6 +50,22 @@ func (s *Service) List(ctx context.Context, subject string) ([]*Grant, error) {
 		if g.Active() {
 			out = append(out, g)
 		}
+	}
+	return out, nil
+}
+
+// ListByClient は clientID の Grant を Subject の昇順で最大 limit 件返す。運用者向けの
+// 「この Client を利用しているユーザーの一覧」用。続きは最後の要素の Subject を after に渡して読む。
+//
+// List と違い、失効済みの Grant も含む（Status と RevokedAt で見分ける）。ページの件数を Store の
+// 1 回の読み取りで決めるためと、運用者が「いつ連携を解除したか」を確認できるようにするためである。
+func (s *Service) ListByClient(ctx context.Context, clientID, after string, limit int) ([]*Grant, error) {
+	if clientID == "" {
+		return nil, errors.New("grant: client id is required")
+	}
+	out, err := s.Store.ListGrantsByClient(ctx, clientID, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("grant: list by client: %w", err)
 	}
 	return out, nil
 }

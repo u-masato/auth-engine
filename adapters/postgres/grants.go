@@ -60,6 +60,30 @@ func (s *Store) ListGrantsBySubject(ctx context.Context, subject string) ([]*gra
 	return out, rows.Err()
 }
 
+// ListGrantsByClient は subject の昇順で返す。ListClients と同じ理由で COLLATE "C" を付け、バイト列としての
+// 比較に固定する。一意制約の索引は既定の照合順序なのでこの並べ替えには使えない。1 つの Client の Grant は
+// 利用者の数だけあるので、専用の索引 grants_client_subject_c（migrations/00005）を用意している。
+func (s *Store) ListGrantsByClient(ctx context.Context, clientID, after string, limit int) ([]*grant.Grant, error) {
+	out := []*grant.Grant{}
+	if limit < 1 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+grantColumns+` FROM grants
+		WHERE client_id = $1 AND subject COLLATE "C" > $2 ORDER BY subject COLLATE "C" LIMIT $3`, clientID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		g, err := scanGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // UpsertGrant は (client_id, subject) の既存行を FOR UPDATE でロックしてから grant.Merge の結果で
 // 更新する。なければ INSERT する。2 つの要求が同時に同じ (client_id, subject) を初めて作ろうとすると
 // 片方が unique_violation になるので、その場合はやり直して既存行への更新にする。
