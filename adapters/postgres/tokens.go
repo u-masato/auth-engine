@@ -162,14 +162,41 @@ func (s *Store) IssueTokens(ctx context.Context, family *token.Family, access *t
 	})
 }
 
-// RotateRefreshToken は旧トークン行を FOR UPDATE でロックし、active のときだけ rotated にして
-// 後継と Access Token を挿入する。同じトークンの同時提示は行ロックで直列化され、2 番目以降は
-// rotated を見て ErrTokenReused になる。
+// RotateRefreshToken は Grant → Token Family → 旧トークンの順に行をロックし、旧トークンが active のときだけ
+// rotated にして後継と Access Token を挿入する。
+//
+// ロックの順序には 2 つの役割がある。
+//
+//   - Grant 行のロックで、RevokeGrant / DeleteClient（Grant 行を UPDATE する）と直列になる。旧トークンだけを
+//     ロックすると、同時に走る失効の UPDATE は文の開始後に挿入された後継と Access Token を見落とし、
+//     失効した Grant の下に有効なトークンが残る（READ COMMITTED では、行ロックの待ちが明けても
+//     文のスナップショットは取り直されない）。
+//   - Family を旧トークンより先にロックして、RevokeTokenFamily（Family → トークンの順）と順序をそろえ、
+//     デッドロックを避ける。
+//
+// 同じトークンの同時提示は Family の行ロックで直列化され、2 番目以降は rotated を見て ErrTokenReused になる。
 func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *token.RefreshToken, access *token.AccessToken, now time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
+		// ロックする行を知るための読み取り。状態の判定は、ロックを取った後の読み直しで行う。
+		var familyID, grantID string
+		err := tx.QueryRowContext(ctx, `SELECT f.id, f.grant_id FROM refresh_tokens r JOIN token_families f ON f.id = r.family_id WHERE r.hash = $1`,
+			oldHash).Scan(&familyID, &grantID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		var grantStatus, familyStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM grants WHERE id = $1 FOR UPDATE`, grantID).Scan(&grantStatus); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM token_families WHERE id = $1 FOR UPDATE`, familyID).Scan(&familyStatus); err != nil {
+			return err
+		}
 		old, err := scanRefresh(tx.QueryRowContext(ctx, `SELECT `+refreshColumns+` FROM refresh_tokens WHERE hash = $1 FOR UPDATE`, oldHash))
 		if err != nil {
-			return err // ErrNotFound を含む
+			return err // ErrNotFound を含む（ロックを待つ間に Purge された場合）
 		}
 		switch old.Status {
 		case token.RefreshRotated:
@@ -179,12 +206,6 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		}
 		if old.Expired(now) {
 			return storage.ErrNotFound
-		}
-		var familyStatus, grantStatus string
-		err = tx.QueryRowContext(ctx, `SELECT f.status, g.status FROM token_families f JOIN grants g ON g.id = f.grant_id WHERE f.id = $1 FOR UPDATE OF f`,
-			old.FamilyID).Scan(&familyStatus, &grantStatus)
-		if err != nil {
-			return err
 		}
 		if familyStatus != string(token.FamilyActive) {
 			return storage.ErrFamilyRevoked
@@ -197,7 +218,11 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n != 1 {
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
 			return storage.ErrTokenReused
 		}
 		if err := insertRefresh(ctx, tx, next); err != nil {

@@ -121,8 +121,9 @@ func (s *Store) upsertGrantOnce(ctx context.Context, candidate *grant.Grant) (*g
 }
 
 // RevokeGrant は Grant 行を CAS で失効させ、同じトランザクションで配下の Family・全トークンを失効させる。
-// Grant 行の更新が行ロックになるので、同時に走る IssueTokens（FOR UPDATE）はこの後に順番が来て
-// ErrGrantRevoked になるか、先に挿入を終えていてここで巻き込まれるかのどちらかになる。
+// Grant 行の更新が行ロックになるので、同時に走る IssueTokens と RotateRefreshToken（どちらも Grant 行を
+// FOR UPDATE でロックする）はこの後に順番が来て ErrGrantRevoked / ErrFamilyRevoked になるか、
+// 先に挿入を終えていてここで巻き込まれるかのどちらかになる。
 func (s *Store) RevokeGrant(ctx context.Context, id string, now time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE grants SET status = $1, revoked_at = $2 WHERE id = $3 AND status = $4`,

@@ -51,11 +51,6 @@ func (s *Service) Revoke(ctx context.Context, req RevocationRequest) error {
 	return nil
 }
 
-// errNoSuchToken は、探している種別のトークンが存在しない（次の種別を探す）ことを表す。
-// Store の ErrNotFound をそのまま使わないのは、Family の欠落のような下位の ErrNotFound を
-// 「この種別ではない」と取り違えて黙って成功にしないため。
-var errNoSuchToken = errors.New("token: no such token")
-
 // revoke は owner が空なら所有者を問わず、空でなければ owner に発行されたトークンだけを失効させる。
 func (s *Service) revoke(ctx context.Context, plaintext, hint, owner string) (bool, error) {
 	if plaintext == "" {

@@ -48,6 +48,7 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		{"RotateRefreshToken", testRotateRefreshToken},
 		{"RotateConcurrent", testRotateConcurrent},
 		{"RevokeGrantVersusIssue", testRevokeGrantVersusIssue},
+		{"RotateVersusRevoke", testRotateVersusRevoke},
 		{"RevokeTokenFamily", testRevokeTokenFamily},
 		{"RevokeAccessToken", testRevokeAccessToken},
 		{"Purge", testPurge},
@@ -895,6 +896,75 @@ func testRevokeGrantVersusIssue(t *testing.T, s authengine.Store) {
 		}
 		if tok.Status != token.AccessRevoked || gg.Active() {
 			t.Fatalf("token issued concurrently with revoke must end up revoked: %+v grant=%+v", tok, gg)
+		}
+	}
+}
+
+// testRotateVersusRevoke は、Rotation と失効（Grant、Token Family、Client の削除）を同時に走らせる。
+//
+// どちらが先になってもよいが、終わった時点で失効は全トークンに及んでいなければならない。
+// Rotation が成功したなら、その後継の Refresh Token と新しい Access Token も失効していること
+// （失効の UPDATE が、同時に挿入された行を取りこぼさないこと）。どちらの操作も、センチネル以外の
+// エラー（デッドロックなど）で失敗してはならない。競合は確率的なので回数を重ねる。
+func testRotateVersusRevoke(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	const rounds = 20
+	revokers := []struct {
+		name   string
+		revoke func(g *grant.Grant, f *token.Family) error
+	}{
+		{"grant", func(g *grant.Grant, _ *token.Family) error { return s.RevokeGrant(ctx, g.ID, base) }},
+		{"family", func(_ *grant.Grant, f *token.Family) error { return s.RevokeTokenFamily(ctx, f.ID, base) }},
+		{"client", func(g *grant.Grant, _ *token.Family) error { return s.DeleteClient(ctx, g.ClientID, base) }},
+	}
+	for _, rv := range revokers {
+		for i := 0; i < rounds; i++ {
+			suffix := fmt.Sprintf("-%s-%d", rv.name, i)
+			if err := s.CreateClient(ctx, newWebClient(t, "c"+suffix)); err != nil {
+				t.Fatal(err)
+			}
+			g, f, _, rt := seedGrantWithTokens(t, s, suffix)
+			next, access := newRefresh("rt2"+suffix, f.ID), newAccess("at2"+suffix, f.ID, g.ID)
+
+			var (
+				wg                   sync.WaitGroup
+				rotateErr, revokeErr error
+				start                = make(chan struct{})
+			)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				<-start
+				rotateErr = s.RotateRefreshToken(ctx, rt.Hash, next, access, base)
+			}()
+			go func() {
+				defer wg.Done()
+				<-start
+				revokeErr = rv.revoke(g, f)
+			}()
+			close(start)
+			wg.Wait()
+
+			if revokeErr != nil {
+				t.Fatalf("%s round %d: revoke failed: %v", rv.name, i, revokeErr)
+			}
+			if rotateErr != nil && !errors.Is(rotateErr, storage.ErrFamilyRevoked) && !errors.Is(rotateErr, storage.ErrGrantRevoked) {
+				t.Fatalf("%s round %d: unexpected rotate error: %v", rv.name, i, rotateErr)
+			}
+			// Rotation の勝ち負けに関わらず、後継と新しい Access Token が有効なまま残っていてはならない
+			if got, err := s.LookupRefreshToken(ctx, next.Hash); err == nil && got.Status == token.RefreshActive {
+				t.Fatalf("%s round %d: successor refresh token survived the revocation (rotate err = %v)", rv.name, i, rotateErr)
+			} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
+				t.Fatal(err)
+			}
+			if got, _, err := s.LookupAccessToken(ctx, access.Hash); err == nil && got.Status == token.AccessActive {
+				t.Fatalf("%s round %d: access token issued by the rotation survived the revocation (rotate err = %v)", rv.name, i, rotateErr)
+			} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
+				t.Fatal(err)
+			}
+			if fam, err := s.GetTokenFamily(ctx, f.ID); err != nil || fam.Active() {
+				t.Fatalf("%s round %d: family must be revoked: %+v, %v", rv.name, i, fam, err)
+			}
 		}
 	}
 }

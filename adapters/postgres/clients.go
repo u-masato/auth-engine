@@ -122,7 +122,7 @@ func (s *Store) DeleteClient(ctx context.Context, id string, now time.Time) erro
 		if n == 0 {
 			return storage.ErrNotFound
 		}
-		// Grant の行ロックを取るので、同じ Grant への IssueTokens（FOR UPDATE）とは直列になる。
+		// Grant の行ロックを取るので、同じ Grant への IssueTokens / RotateRefreshToken（FOR UPDATE）とは直列になる。
 		if _, err := tx.ExecContext(ctx, `UPDATE grants SET status = $1, revoked_at = $2 WHERE client_id = $3 AND status = $4`,
 			string(grant.StatusRevoked), now.UnixNano(), id, string(grant.StatusActive)); err != nil {
 			return err
