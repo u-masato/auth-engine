@@ -54,6 +54,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 
 ## 設計
 
+- [Architecture](docs/architecture.md) — 全体構成、認可フロー、トークンの状態管理、MCP 連携を図とコード参照で読む
 - [設計ドキュメント索引](docs/README.md) — ADR と技術スタック案に対する判断の要約
 - [Interaction App との契約](docs/adr/0003-interaction-contract.md) — ヘッドレス構成の核心
 - [組み込みガイド](docs/embedding.md) — エンジンを自分のサービスに組み込む人向け

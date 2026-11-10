@@ -7,6 +7,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 
 | 文書 | 内容 |
 | --- | --- |
+| [Architecture](architecture.md) | 実装から読む全体構成。責務と依存関係、認可フロー、状態管理、MCP、永続化を図とコード参照で解説 |
 | [準拠仕様一覧](specifications.md) | 準拠仕様の段階分け（P0〜P3） |
 | [ADR-0001 スコープと設計原則](adr/0001-scope-and-principles.md) | 本体と外部アプリの責務分担、設計原則、P0 で提供しないもの |
 | [ADR-0002 技術スタック](adr/0002-tech-stack.md) | 言語・ライブラリ・ツールの採否 |
