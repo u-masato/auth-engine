@@ -35,6 +35,7 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		fn   func(t *testing.T, s authengine.Store)
 	}{
 		{"Client", testClient},
+		{"ClientList", testClientList},
 		{"ClientUpdate", testClientUpdate},
 		{"ClientDeleteCascades", testClientDeleteCascades},
 		{"ClientDeleteVersusIssue", testClientDeleteVersusIssue},
@@ -219,6 +220,81 @@ func testClient(t *testing.T, s authengine.Store) {
 	}
 	if err := gotMCP.Validate(); err != nil {
 		t.Fatalf("restored mcp client must validate: %v", err)
+	}
+}
+
+// testClientList は ListClients の順序（ID のバイト列としての昇順）、キーセットページング、
+// 削除後の一覧を確かめる。大文字と小文字、記号を混ぜるのは、ロケール依存の照合順序を使う
+// データベースでも同じ順序になることを確かめるため。
+func testClientList(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	ids := func(cs []*client.Client) []string {
+		out := make([]string, 0, len(cs))
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return out
+	}
+	list := func(after string, limit int) []string {
+		t.Helper()
+		cs, err := s.ListClients(ctx, after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cs == nil {
+			t.Fatal("ListClients must return an empty slice, not nil")
+		}
+		return ids(cs)
+	}
+	if got := list("", 10); len(got) != 0 {
+		t.Fatalf("empty store: %v", got)
+	}
+
+	// 登録順は ID の順と変える。バイト列の昇順は "B" < "_x" < "a" < "b" < "c-1"。
+	for _, id := range []string{"b", "_x", "c-1", "B", "a"} {
+		if err := s.CreateClient(ctx, newWebClient(t, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"B", "_x", "a", "b", "c-1"}
+	if got := list("", 10); !slices.Equal(got, want) {
+		t.Fatalf("order: got %v, want %v", got, want)
+	}
+	// ページング: 最後の要素の ID を after に渡して続きを読む
+	if got := list("", 2); !slices.Equal(got, want[:2]) {
+		t.Fatalf("first page: got %v, want %v", got, want[:2])
+	}
+	if got := list("_x", 2); !slices.Equal(got, want[2:4]) {
+		t.Fatalf("second page: got %v, want %v", got, want[2:4])
+	}
+	if got := list("b", 2); !slices.Equal(got, want[4:]) {
+		t.Fatalf("last page: got %v, want %v", got, want[4:])
+	}
+	if got := list("c-1", 2); len(got) != 0 {
+		t.Fatalf("past the end: %v", got)
+	}
+	// after は登録済みの ID でなくてもよい（途中で削除されても続きを読める）
+	if got := list("a0", 10); !slices.Equal(got, want[3:]) {
+		t.Fatalf("after a missing id: got %v, want %v", got, want[3:])
+	}
+	if got := list("", 0); len(got) != 0 {
+		t.Fatalf("limit 0: %v", got)
+	}
+
+	// 内容は GetClient と同じものが戻る
+	cs, err := s.ListClients(ctx, "", 1)
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("list one: %v, %v", cs, err)
+	}
+	if err := cs[0].Validate(); err != nil {
+		t.Fatalf("listed client must validate: %v", err)
+	}
+	// 削除した Client は一覧から消える
+	if err := s.DeleteClient(ctx, "a", base); err != nil {
+		t.Fatal(err)
+	}
+	if got := list("", 10); !slices.Equal(got, []string{"B", "_x", "b", "c-1"}) {
+		t.Fatalf("after delete: %v", got)
 	}
 }
 

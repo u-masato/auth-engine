@@ -33,6 +33,15 @@ type Store interface {
 	// CreateClient は Client を保存する。同じ ID が既にあれば storage.ErrAlreadyExists を返す。
 	CreateClient(ctx context.Context, c *Client) error
 
+	// ListClients は登録済みの Client を ID の昇順（バイト列としての比較）で最大 limit 件返す。
+	// after が空でなければ、ID が after より大きいものだけを返す。続きを読むときは、前回の最後の
+	// 要素の ID を after に渡す（キーセットページング。途中で登録・削除があっても重複や飛ばしが起きない）。
+	// 該当がなければ空のスライス。limit が 1 未満のときも空のスライスを返す。
+	//
+	// 運用者向けの管理操作（一覧画面、棚卸し）のためのもので、プロトコル処理からは呼ばない。
+	// CIMD で解決した Client は Store にないので含まれない。
+	ListClients(ctx context.Context, after string, limit int) ([]*Client, error)
+
 	// UpdateClient は c.ID の Client を c の内容で置き換える。c は Client.Update で作る。
 	//
 	//   - 存在しない: storage.ErrNotFound。

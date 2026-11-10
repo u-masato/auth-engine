@@ -8,8 +8,10 @@
 // エンジンは複数のメソッド呼び出しをまたいで一貫性を期待しない
 // （docs/adr/0005-storage-port.md §1）。
 //
-// Client の更新と削除（client.Store の UpdateClient / DeleteClient）も同じ契約に従う。
+// Client の一覧・更新・削除（client.Store の ListClients / UpdateClient / DeleteClient）も同じ契約に従う。
 //
+//   - ListClients は ID の昇順（バイト列としての比較）で返す。照合順序がロケールに依存する
+//     データベースでは、並べ替えと after との比較の両方をバイト列の比較に固定する。
 //   - UpdateClient は保存済みの Profile との照合と更新を 1 つの操作で行う。Profile が違えば
 //     ErrStateConflict を返し、何も変更しない（docs/adr/0004-client-profiles.md §4）。
 //   - DeleteClient は Client の削除、その Client の全 Grant の失効（配下の全 Token Family・

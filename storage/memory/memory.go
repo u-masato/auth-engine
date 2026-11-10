@@ -90,6 +90,26 @@ func (s *Store) CreateClient(_ context.Context, c *client.Client) error {
 	return nil
 }
 
+func (s *Store) ListClients(_ context.Context, after string, limit int) ([]*client.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.clients))
+	for id := range s.clients {
+		if id > after {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := []*client.Client{}
+	for _, id := range ids {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, clone(s.clients[id]))
+	}
+	return out, nil
+}
+
 func (s *Store) UpdateClient(_ context.Context, c *client.Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

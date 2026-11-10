@@ -31,6 +31,7 @@
 | `RevokeGrant(ctx, grantID, now)` | Grant と、それに属する全 Token Family・全トークンを失効 | 1 トランザクションで `UPDATE grants` → `UPDATE refresh_tokens` → `UPDATE access_tokens` |
 | `RevokeTokenFamily(ctx, familyID, now)` | Family 内の全トークンを失効 | 同上 |
 | `UpdateClient(ctx, client)`（2026-10-25 追加） | 保存済みの Profile が一致するときだけ開放項目を置き換える。違えば `ErrStateConflict`、なければ `ErrNotFound`。ID・Profile・作成日時は変えない（ADR-0004 §4） | `UPDATE clients SET ... WHERE id=? AND profile=?` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
+| `ListClients(ctx, after, limit)`（2026-11-10 追加。**草案**: レビューで確定する） | 登録済みの Client を ID の昇順（バイト列としての比較）で最大 `limit` 件返す。`after` が空でなければ ID がそれより大きいものだけ（キーセットページング）。運用者向けの管理操作で、プロトコル処理からは呼ばない。CIMD で解決した Client は含まない | `SELECT ... WHERE id > ? ORDER BY id LIMIT ?`。PostgreSQL は既定の照合順序がロケール依存なので `COLLATE "C"` で固定する |
 | `DeleteClient(ctx, clientID, now)`（2026-10-25 追加） | Client を削除し、その Client の全 Grant と配下の全 Token Family・全トークンを失効、Authorization Code を削除。なければ `ErrNotFound` で何もしない。Grant の行は失効済みとして残す。進行中の Txn には触れないので、削除後の Resume で Grant が active に戻りうる。同じ ID の作り直しは Txn の有効期限後に行う | 1 トランザクションで `DELETE FROM clients`（rows=1 確認）→ `UPDATE grants` → `UPDATE refresh_tokens` / `access_tokens` / `token_families` → `DELETE FROM authorization_codes`。PostgreSQL では Grant の行ロックで `IssueTokens`（`FOR UPDATE`）と直列になる |
 
 SQLite 側の前提:

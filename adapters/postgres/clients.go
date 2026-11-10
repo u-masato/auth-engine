@@ -68,6 +68,30 @@ func (s *Store) CreateClient(ctx context.Context, c *client.Client) error {
 		int64(c.AccessTokenTTL), c.IDTokenAlg, c.AllowInsecureLocalhost, mustNanos(c.CreatedAt))
 }
 
+// ListClients は id の昇順で返す。データベースの既定の照合順序はロケールに依存するので、COLLATE "C" で
+// バイト列としての比較に固定する（他の Adapter と同じ順序にし、after との比較も同じ規則にする）。
+// 主キーの索引は既定の照合順序なのでこの並べ替えには使われないが、Client の件数では問題にならない。
+func (s *Store) ListClients(ctx context.Context, after string, limit int) ([]*client.Client, error) {
+	out := []*client.Client{}
+	if limit < 1 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+clientColumns+` FROM clients
+		WHERE id COLLATE "C" > $1 ORDER BY id COLLATE "C" LIMIT $2`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		c, err := scanClient(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {
 	redirectURIs, err := mustJSON(c.RedirectURIs)
 	if err != nil {
