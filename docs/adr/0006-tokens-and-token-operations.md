@@ -1,6 +1,6 @@
 # ADR-0006: トークン形式と Token Operations
 
-- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で JWT Access Token と Audience を追加（[ADR-0008](0008-mcp-integration.md) §3）。2026-11-11 追記: §5 に Client ごとの Grant の一覧（草案。マージで確定）
+- 状態: 採用（2026-10-24 合意）。2026-10-25 更新: M3 で JWT Access Token と Audience を追加（[ADR-0008](0008-mcp-integration.md) §3）。2026-11-11 追記: §5 に Client ごとの Grant の一覧。PR #41 のマージで確定（2026-11-12）
 - 日付: 2026-10-24（2026-11-11 更新）
 
 ## 文脈
@@ -63,7 +63,7 @@ Txn が消費された後も `/userinfo` は Claims を返す必要がある。�
 | `RevokeToken(token)` | 採用（M2） | Revocation（RFC 7009）と同じ Use Case。Refresh Token の失効は Family 全体を失効 |
 | `RevokeGrant(clientID, subject)` | 採用（M2） | 「このアプリとの連携を解除する」ための管理操作。プロトコル上の対応物はない。M2 は Go API のみ。2026-10-25 に Interaction API の `DELETE /grants?subject=&client_id=` でも提供した（別プロセスの Interaction App から呼べるように。成功 `204`、失効済みでも `204`、未登録 `404`） |
 | `ListGrants(subject)` | 採用（M2） | 同上。Interaction App が「連携済みアプリ一覧」を描くための読み取り |
-| `ListGrantsByClient(clientID, after, limit)` | 採用（2026-11-11。草案） | 運用者が「この Client を利用しているユーザー」を一覧するための読み取り（`grant.Service.ListByClient`）。Subject の昇順で件数を区切って返す（ADR-0005 §3）。`ListGrants(subject)` と違い失効済みも含む（状態と失効日時で見分ける）。利用者本人の操作ではないので Interaction API には出さず、Go API だけにする。HTTP で使う例は `examples/standalone/adminapi` |
+| `ListGrantsByClient(clientID, after, limit)` | 採用（2026-11-11） | 運用者が「この Client を利用しているユーザー」を一覧するための読み取り（`grant.Service.ListByClient`）。Subject の昇順で件数を区切って返す（ADR-0005 §3）。`ListGrants(subject)` と違い失効済みも含む（状態と失効日時で見分ける）。利用者本人の操作ではないので Interaction API には出さず、Go API だけにする。HTTP で使う例は `examples/standalone/adminapi` |
 | `Mint`（信頼されたバックエンドから任意 Access Token 発行） | **却下（P0〜P2）** | 下記 |
 | `Reissue` | **却下** | Opaque では Claims を持たないため成立しない。JWT AT を導入しても「新規発行 + 旧失効」の組合せで表現できる |
 
