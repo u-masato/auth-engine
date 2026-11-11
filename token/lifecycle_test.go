@@ -3,6 +3,7 @@ package token_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,4 +207,61 @@ func TestInspectRefreshTokenWithMissingFamilyIsInternalError(t *testing.T) {
 	if in, err := f.svc.Inspect(f.ctx, res.AccessToken, ""); err != nil || !in.Active {
 		t.Fatalf("access token must still be inspectable: %+v %v", in, err)
 	}
+}
+
+// purgeAfterLookupStore は、Refresh Token を引いた直後に Purge が走った状況を模す。
+// Purge は期限切れの Refresh Token と、子のなくなった Family を同じ操作で消す（ADR-0005 §7）。
+type purgeAfterLookupStore struct {
+	token.Store
+	purge func()
+	once  sync.Once
+}
+
+func (s *purgeAfterLookupStore) LookupRefreshToken(ctx context.Context, hash string) (*token.RefreshToken, error) {
+	rt, err := s.Store.LookupRefreshToken(ctx, hash)
+	s.once.Do(s.purge)
+	return rt, err
+}
+
+// 引いた直後に Purge で Refresh Token ごと Family が消えたのは不整合ではない。Family の欠落
+// （上の 2 つのテスト）と区別して、不明なトークンと同じ扱いにする。
+func TestRefreshTokenPurgedAfterLookupIsUnknownToken(t *testing.T) {
+	purged := func(t *testing.T) (*fixture, *token.Response) {
+		t.Helper()
+		f := newFixture(t)
+		res := f.exchangeForRefresh(t)
+		f.svc.Store = &purgeAfterLookupStore{Store: f.store, purge: func() {
+			if err := f.store.Purge(f.ctx, now.Add(365*24*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+		}}
+		return f, res
+	}
+	t.Run("inspect", func(t *testing.T) {
+		f, res := purged(t)
+		in, err := f.svc.Inspect(f.ctx, res.RefreshToken, token.HintRefreshToken)
+		if err != nil || in.Active {
+			t.Fatalf("want inactive without an error, got %+v %v", in, err)
+		}
+	})
+	t.Run("revoke", func(t *testing.T) {
+		f, res := purged(t)
+		// RFC 7009 §2.2: 不明なトークンの失効は成功として扱う
+		err := f.svc.Revoke(f.ctx, token.RevocationRequest{Token: res.RefreshToken, TokenTypeHint: token.HintRefreshToken, Credentials: f.webCreds()})
+		if err != nil {
+			t.Fatalf("want success, got %v", err)
+		}
+	})
+	t.Run("revoke token", func(t *testing.T) {
+		f, res := purged(t)
+		found, err := f.svc.RevokeToken(f.ctx, res.RefreshToken, token.HintRefreshToken)
+		if err != nil || found {
+			t.Fatalf("want found=false without an error, got found=%v err=%v", found, err)
+		}
+	})
+	t.Run("refresh", func(t *testing.T) {
+		f, res := purged(t)
+		_, err := f.svc.Exchange(f.ctx, f.refreshRequest(res.RefreshToken, ""))
+		wantProtocolErr(t, err, token.CodeInvalidGrant)
+	})
 }

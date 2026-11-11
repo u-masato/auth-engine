@@ -42,6 +42,10 @@ func (s *Service) refresh(ctx context.Context, c *client.Client, req Request) (*
 	}
 	family, err := s.Store.GetTokenFamily(ctx, old.FamilyID)
 	if err != nil {
+		// 引いた直後に Purge で Refresh Token ごと消えたなら、不明なトークンと同じ扱い。
+		if errors.Is(s.parentLookupErr(ctx, oldHash, err), errNoSuchToken) {
+			return nil, protocolErr(CodeInvalidGrant, "refresh token is invalid")
+		}
 		return nil, fmt.Errorf("token: get token family: %w", err)
 	}
 	// RFC 6749 §6: Refresh Token は発行先の Client に束縛される。他の Client からの提示は

@@ -26,7 +26,7 @@
 | `ON CONFLICT DO NOTHING` | 主キーの重複時に何もしない INSERT。更新行数 0 で重複を検出する | `insertOnce` |
 | 一意制約違反のやり直し | 同時の初回 upsert で両方が INSERT したとき、負けた方をやり直して Merge に進ませること | PostgreSQL の `UpsertGrant` |
 | 失効の連鎖 | Grant → Family → Access / Refresh Token と、配下をまとめて失効させること | `revokeFamiliesWhere` |
-| Purge | 期限切れの Transaction、Code、トークンの行を削除する。正しさではなく容量の問題を扱う | `Store.Purge` |
+| Purge | 期限切れの Transaction、Code、トークンの行と、子のなくなった Family・失効済み Grant の行を削除する。正しさではなく容量の問題を扱う | `Store.Purge` |
 | 契約テスト | 全 Adapter が通すべき共通のテスト。新しい Adapter が契約を満たすことの定義になる | `storagetest.Run` |
 | マイグレーション | スキーマの段階的な変更。SQL を埋め込み、goose をライブラリとして呼ぶ | `Migrate` |
 | Testcontainers | テストから Docker で PostgreSQL を起動する仕組み。Docker がなければ Skip する | `adapters/postgres/postgres_test.go` |
@@ -134,7 +134,13 @@ Code を削除する理由は少し込み入っている。同じ client_id で 
 
 ### 6. Purge
 
-`Store.Purge(now)` は期限切れの Transaction、Code、Access Token、Refresh Token を削除する。消費済みの Code もここで消える（期限が過ぎれば再利用の検知は要らない）。Grant と Family は削除しない。呼び出す頻度はホストのスケジューラに任せる（architecture.md §10）。
+`Store.Purge(now)` は期限切れの Transaction、Code、Access Token、Refresh Token を削除する。消費済みの Code もここで消える（期限が過ぎれば再利用の検知は要らない）。呼び出す頻度はホストのスケジューラに任せる（architecture.md §10）。
+
+同じ呼び出しで、**子のなくなった親**も消す（ADR-0005 §7）。トークンが 1 本も残っていない Family と、Family が残っていない失効済みの Grant である。Family は Code 交換のたびに 1 行増えるので、消さなければ行数に上限がない。active な Grant は Family がなくても残す。同意の記録だからである。
+
+親を失効と同時に消さず、子がなくなるまで待つのには理由がある。失効済みの行は、提示されたトークンを「失効済み」と判定するために要る。子の行が残っている間に親を消すと、Introspection が Refresh Token → Family → Grant とたどる途中で親が見つからず、不整合と区別がつかなくなる。子がなくなれば、何を提示されても「見つからない」で拒否されるので、親の行に役目は残らない。
+
+PostgreSQL では、親の候補を `FOR UPDATE SKIP LOCKED` でロックしてから消す。Rotation や失効は Grant → Family → トークンの順にロックを取るので、トークンから親へ進む Purge がロックを待つとデッドロックしうる。待たずに飛ばした行は、次回の Purge が消す。
 
 期限の判定はすべて `Expired(now)` で行っているので、Purge を呼ばなくても**正しさ**は変わらない。Purge は容量の問題を扱うだけである。
 
@@ -219,6 +225,6 @@ PostgreSQL は Docker が必要（なければ Skip される）。
 1. 消えたもの: トランザクションの開始・確定・ロールバックの制御と、分離レベルやロックを意識したコード。Service は「意図を表すメソッドを呼び、戻り値のセンチネルエラーで分岐する」だけになる。Adapter に移った責任: 各メソッドを単体で原子的に実装すること（DB トランザクション、行ロック、条件付き UPDATE、プロセス内 Mutex など手段は Adapter が選ぶ）と、契約テストを通すこと。
 2. 「未消費・未期限なら消費済みにする」を `UPDATE ... WHERE consumed_at IS NULL AND expires_at > $1 RETURNING` の 1 文で行っているからである。PostgreSQL は 1 文の UPDATE を原子的に実行し、同じ行への同時 UPDATE は行ロックで直列化され、後の文は WHERE を再評価して 0 行になる。続く SELECT は、0 行だった理由（消費済みか、期限切れか、存在しないか）を調べるためだけのもので、判定の原子性には関わらない。
 3. 「失効が終わった後に発行が成功し、active なトークンが残る」こと。`IssueTokens` は Grant 行を `SELECT ... FOR UPDATE` でロックしてから status を確かめ、`RevokeGrant` は同じ行を UPDATE する。行ロックで必ずどちらかが先になり、失効が先なら発行は `ErrGrantRevoked`、発行が先なら失効がその Family も連鎖で失効させる。
-4. 正しさは変わらない。期限の判定はすべて `Expired(now)` で行うので、期限切れの行が残っていても有効とは判定されない。運用面では、Transaction、Code、トークンの行が溜まり続け、DB の容量と索引の効率が悪化する。
+4. 正しさは変わらない。期限の判定はすべて `Expired(now)` で行うので、期限切れの行が残っていても有効とは判定されない。運用面では、Transaction、Code、トークンの行と、それらがなくなれば消えるはずの Family・失効済み Grant の行が溜まり続け、DB の容量と索引の効率が悪化する。
 5. 削除前に同意が済んだ Transaction を削除後に Resume すると、`UpsertGrant` が Grant を active に戻し、新しい Code が発行される（交換は Client 認証で失敗するので、トークンは出ない）。同じ client_id で Client を作り直すと、この Grant と Code が新しい Client に引き継がれうる。だから作り直しは、Transaction の最大寿命（`TransactionTTL`、上限 1 時間）が過ぎてから行う。
 </details>

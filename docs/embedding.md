@@ -62,7 +62,7 @@ Clients（Store.CreateClient で事前に登録）
 
 ### 期限切れデータの削除
 
-エンジンは期限切れの行を自動では消さない。Transaction・Authorization Code・Access Token・Refresh Token のうち `expires_at` を過ぎたものを、`Store.Purge(ctx, now)` で削除する。呼び出しは利用者のスケジューラ（cron、ジョブ、プロセス内のティッカー）から行う。
+エンジンは期限切れの行を自動では消さない。Transaction・Authorization Code・Access Token・Refresh Token のうち `expires_at` を過ぎたものを、`Store.Purge(ctx, now)` で削除する。同じ呼び出しで、トークンが 1 本も残っていない Token Family と、Token Family が残っていない失効済みの Grant も消える（[ADR-0005](adr/0005-storage-port.md) §7）。有効な同意（active な Grant）と Client は消えない。呼び出しは利用者のスケジューラ（cron、ジョブ、プロセス内のティッカー）から行う。
 
 ```go
 go func() {

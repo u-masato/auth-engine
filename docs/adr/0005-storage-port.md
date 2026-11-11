@@ -1,6 +1,6 @@
 # ADR-0005: Storage Port と不変条件の保証
 
-- 状態: 採用（2026-10-24 合意）。2026-11-11 更新: §2〜§4 と §6 のメソッドの形・エラー・実現方法の記述を実装に合わせた。決定（操作単位の原子性、Port にトランザクション抽象を置かない）は変えていない。計画からの差分は末尾の「実装結果」。同日の追記: 運用の操作 2 つ（`RotateClientSecret`、`ListGrantsByClient`）と `UpdateClient` がシークレットを書かないこと。この追記は PR #41 のマージで確定（2026-11-12）
+- 状態: 採用（2026-10-24 合意）。2026-11-11 更新: §2〜§4 と §6 のメソッドの形・エラー・実現方法の記述を実装に合わせた。決定（操作単位の原子性、Port にトランザクション抽象を置かない）は変えていない。計画からの差分は末尾の「実装結果」。同日の追記: 運用の操作 2 つ（`RotateClientSecret`、`ListGrantsByClient`）と `UpdateClient` がシークレットを書かないこと。この追記は PR #41 のマージで確定（2026-11-12）。2026-11-11 追加: §7（`Purge` が子のなくなった Token Family と失効済みの Grant も削除する）
 - 日付: 2026-10-24（2026-11-11 更新）
 
 ## 文脈
@@ -34,7 +34,7 @@
 | `UpsertGrant(ctx, candidate)` | `client_id` × `subject` の Grant を作成または更新し、保存後の Grant を返す。既存が `active` なら scope を和集合にし、`revoked` なら候補の内容で `active` に戻す（`grant.Merge`） | 1 トランザクションで既存行を読み（PostgreSQL は `FOR UPDATE`）→ `UPDATE` か `INSERT`。PostgreSQL は同時の初回作成が一意制約に当たったらやり直す |
 | `UpdateClient(ctx, client)`（2026-10-25 追加） | 保存済みの Profile が一致するときだけ開放項目を置き換える。違えば `ErrStateConflict`、なければ `ErrNotFound`。ID・Profile・作成日時・シークレットのハッシュは変えない（ADR-0004 §4。シークレットを除いたのは 2026-11-11。下の `RotateClientSecret` の行を参照） | `UPDATE clients SET ... WHERE id=? AND profile=?` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
 | `RotateClientSecret(ctx, clientID, secretHash)`（2026-11-11 追加） | シークレットを持つ Client のハッシュだけを置き換える。保存した時点で旧シークレットは使えなくなる。なければ `ErrNotFound`、保存済みの Client がシークレットを持たない（public）か `secretHash` が空なら `ErrStateConflict`。他の項目・トークン・Grant には触れない。`UpdateClient` と分けたのは、再発行より前に読んだ Client を `UpdateClient` で保存したときに、無効にしたはずの旧シークレットが戻るのを防ぐため（読んでから書く 2 操作の競合を、意図を表す 1 メソッドで解く） | `UPDATE clients SET secret_hash=? WHERE id=? AND secret_hash<>''` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
-| `DeleteClient(ctx, clientID, now)`（2026-10-25 追加） | Client を削除し、その Client の全 Grant と配下の全 Token Family・全トークンを失効、Authorization Code を削除。なければ `ErrNotFound` で何もしない。Grant の行は失効済みとして残す。進行中の Txn には触れないので、削除後の Resume で Grant が active に戻りうる。同じ ID の作り直しは Txn の有効期限後に行う | 1 トランザクションで `DELETE FROM clients`（rows=1 確認）→ `UPDATE grants` → `UPDATE access_tokens` / `refresh_tokens` / `token_families` → `DELETE FROM authorization_codes`。PostgreSQL では Grant の行ロックで `IssueTokens` / `RotateRefreshToken`（`FOR UPDATE`）と直列になる |
+| `DeleteClient(ctx, clientID, now)`（2026-10-25 追加） | Client を削除し、その Client の全 Grant と配下の全 Token Family・全トークンを失効、Authorization Code を削除。なければ `ErrNotFound` で何もしない。Grant の行は失効済みとして残す（配下の Token Family がなくなれば `Purge` が消す。§7）。進行中の Txn には触れないので、削除後の Resume で Grant が active に戻りうる。同じ ID の作り直しは Txn の有効期限後に行う | 1 トランザクションで `DELETE FROM clients`（rows=1 確認）→ `UPDATE grants` → `UPDATE access_tokens` / `refresh_tokens` / `token_families` → `DELETE FROM authorization_codes`。PostgreSQL では Grant の行ロックで `IssueTokens` / `RotateRefreshToken`（`FOR UPDATE`）と直列になる |
 
 SQLite 側の前提:
 
@@ -59,7 +59,7 @@ SQLite 側の前提:
 | `LookupAccessToken(ctx, hash)` | Access Token と、それが属する Grant を併せて返す（失効チェックの二重化） |
 | `LookupRefreshToken(ctx, hash)` | Refresh Token だけを返す。Client・subject・scope は Family を介して結びつくので、呼び出し側が `GetTokenFamily` で引く |
 | `GetTokenFamily(ctx, id)` | Refresh Token の所有者の確認、Refresh 応答の ID Token に載せる元の認証情報（`auth_time` / `amr` / `acr`）の取得 |
-| `Purge(ctx, now)` | 期限切れの Txn・Code（消費済みを含む）・Access Token・Refresh Token の削除。Grant・Token Family・Client は削除しない。呼び出しは利用者のスケジューラに委ねる |
+| `Purge(ctx, now)` | 期限切れの Txn・Code（消費済みを含む）・Access Token・Refresh Token の削除と、子のなくなった Token Family・失効済みの Grant の削除（§7。2026-11-11 に範囲を広げた）。`active` な Grant と Client は削除しない。呼び出しは利用者のスケジューラに委ねる |
 
 ### 4. インターフェースの形
 
@@ -95,15 +95,51 @@ type Store interface {
 `storage/storagetest` パッケージに、`func Run(t *testing.T, open func(t *testing.T) authengine.Store)` を提供する。全 Adapter はこれを通すことを CI の必須条件とする。内容:
 
 - 各複合操作の正常系・状態違反系
-- **並行テスト**: 同一 Code の同時消費（成功は 1 つ、他は `ErrCodeAlreadyUsed`）、同一 Refresh Token の同時 Rotation（成功は 1 つ）、Grant 失効と `IssueTokens` の競合（失効後の発行は必ず失敗）、Txn の同時 Complete（成功は 1 つ）、Client の削除と `IssueTokens` の競合、Rotation と失効（Grant・Token Family・Client の削除）の競合（後継のトークンが有効なまま残らない）
+- **並行テスト**: 同一 Code の同時消費（成功は 1 つ、他は `ErrCodeAlreadyUsed`）、同一 Refresh Token の同時 Rotation（成功は 1 つ）、Grant 失効と `IssueTokens` の競合（失効後の発行は必ず失敗）、Txn の同時 Complete（成功は 1 つ）、Client の削除と `IssueTokens` の競合、Rotation と失効（Grant・Token Family・Client の削除）の競合（後継のトークンが有効なまま残らない）、`Purge` と Rotation の競合（後継があれば Token Family も残る）、`Purge` と `UpsertGrant` の競合（返った Grant は `active` で、その ID で発行できる）
 - `go test -race` 下で実行
 
 In-Memory Store（`storage/memory`）はエンジンの単体テスト専用とし、同じ契約テストを通すが、**安全性の根拠は SQLite / PostgreSQL のテスト結果に置く**。
+
+### 7. Purge が削除する範囲（2026-11-11 追加）
+
+2026-10-24 の決定では、`Purge` は期限切れの Txn・Code・トークンだけを消し、Token Family と Grant は残した。Family は Code 交換と `client_credentials` 要求のたびに 1 行増え、配下のトークンが消えた後も残るので、行数に上限がなかった。失効済みの Grant も残るが、こちらは `client_id` × `subject` の組の数が上限で、再同意は同じ行を使い回す。
+
+`Purge` は 1 回の呼び出しで、次の順に削除する。
+
+| 順 | 対象 | 条件 |
+| --- | --- | --- |
+| 1 | Txn・Authorization Code・Access Token・Refresh Token | `expires_at` が `now` 以前（従来どおり。消費済みの Code、rotated / revoked のトークンを含む） |
+| 2 | Token Family | 配下に Access Token も Refresh Token もない。`active` / `revoked` を問わない |
+| 3 | Grant | `revoked` で、配下に Token Family がない |
+
+`active` な Grant は Token Family がなくても消さない。同意の記録であり、同意画面の省略（`FindGrant`）に使う。Client も消さない。
+
+**親を消してよいのは、それを参照する子がなくなったとき**である。失効済みの行の役目は、提示されたトークンを「失効済み」と判定することにある。子の行がなければ、何を提示されても「見つからない」で拒否されるので、親の行に役目は残らない。保持期間は自然にトークンの最長寿命（Refresh Token の絶対期限）になり、設定項目もスケジューラの契約も増えない。
+
+この規則が保つ不変条件と、それに依存する箇所:
+
+- **子があれば親がある。** 順 1〜3 は 1 つの原子的な操作なので、Refresh Token が残っているのに Family がない、という状態は他の操作から見えない。`token.Service` はこれに依存して、「Refresh Token を引いた後に Family / Grant がない」を次の 2 つに分ける（`parentLookupErr`）。引き直して Refresh Token も消えていれば、引いた直後に Purge されたので不明なトークンとして扱う。Refresh Token が残っていれば不整合なので内部エラーにする（2026-11-10 の扱いのまま）。
+- **消えた Grant の ID では発行できない。** `IssueTokens` は Grant の行がないときも `ErrGrantRevoked` を返す。失効前に発行された Code が、Grant の削除後に交換されても通らない。
+- **再同意は新しい Grant になる。** 失効済みの Grant が消えた後の `UpsertGrant` は、候補の ID と `CreatedAt` で新しい行を作る。消える前なら従来どおり同じ行を `active` に戻す。
+- **Code は Family の削除を妨げない。** 消費済みの Code が Family ID を持ったまま残っていても、トークンのない Family は消す。その Code が再提示されたときの `RevokeTokenFamily` は `ErrNotFound` になるが、失効させるトークンがないので結果は変わらない（`token.Service` は `ErrNotFound` を無視して再利用を記録する）。
+
+実現:
+
+- SQLite と `storage/memory` は書き込みが直列なので、1 トランザクション（1 つの Mutex 区間）で順に `DELETE` する。Family と Grant は全件を走査し、子の有無は `family_id` / `grant_id` の索引で引く。走査の間は他の書き込みが待つ。
+- PostgreSQL は順 2 と順 3 の候補を `FOR UPDATE SKIP LOCKED` でロックしてから消す。Rotation と失効は Grant → Family → トークンの順に行をロックするので、トークンから親へ進む Purge が行ロックを待つとデッドロックしうる。他の操作がロックしている行は飛ばし、次回の Purge に回す。`RotateRefreshToken` は、ロックする行を読んだ後に Purge が Family や Grant を消していた場合を `ErrNotFound` にする。
+
+外から見える挙動の変化:
+
+- `DELETE /grants` は、失効済みの Grant が Purge された後は `204` ではなく `404 not_found` を返す（Purge されるまでは従来どおり `204`）。
+- 失効と再同意をまたいで保たれていた Grant の ID と `CreatedAt` は、間に Purge が入ると新しくなる。
+- 自作の Adapter は `Purge` の実装を広げ、契約テスト（`PurgeChildlessParents` `PurgeVersusRotate` `PurgeVersusUpsertGrant`）を通す必要がある。
 
 ## 却下した代替案
 
 - **Repository + Unit of Work（`BeginTx` を Port に置く）**: エンジン側で「`GetCode` → 検査 → `MarkConsumed`」と書けて読みやすいが、Adapter ごとの分離レベルの差（SQLite は直列、PostgreSQL は READ COMMITTED）が競合の正しさに影響し、エンジンの読者が DB の意味論を知らないと正しさを判断できない。
 - **Code の消費を `DELETE ... RETURNING` で行う**: 1 文で済むが、消費済み Code の再提示を「不明」と区別できず、RFC 6749 §4.1.2 の「再利用検知時に当該 Code 由来のトークンを失効」が実装できない。
+- **失効と同時に Grant や Token Family の行を消す**（2026-11-11、§7）: 行数は最も早く減るが、3 つの理由で採らない。(1) Introspection と Revocation は Refresh Token → Family → Grant を別々の呼び出しでたどるので、失効と同時に走ると途中で親が消え、不整合（500）と区別がつかない。行が残っていれば `active: false` を返せる。(2) トークンが出回っている間に「失効済み」と「未知」を区別できなくなり、`DELETE /grants` の冪等な `204` も失う。(3) 増え続けるのは `active` な Grant の下の Family なので、失効を起点にした削除では行数の問題が解けない。
+- **Token Family に保持期間の設定を足す**（同上）: 削除の時期を利用者が選べるが、正しい値は「トークンの最長寿命」で決まっており、短くすれば §7 の不変条件を壊す。選ばせる理由がない。
 
 ## 影響
 
@@ -125,9 +161,9 @@ In-Memory Store（`storage/memory`）はエンジンの単体テスト専用と�
 | センチネル | 5 種を列挙 | 7 種。`ErrAlreadyExists`（作成の重複）と `ErrFamilyRevoked`（失効済みの Family への操作）は M1 からあったが、列挙に載っていなかった |
 | SQLite の書き込み | `SQLITE_BUSY` 時のリトライ | プロセス内の Mutex で直列化（リトライは実装していない） |
 | 失効の `UPDATE` の順 | `grants` → `refresh_tokens` → `access_tokens` | `grants` → `access_tokens` → `refresh_tokens` → `token_families`（Family にも状態を持たせたため） |
+| `Purge` の範囲 | 期限切れの Txn・Code・トークンだけ。Grant・Token Family は残す | 子のなくなった Token Family と、Token Family のなくなった失効済みの Grant も消す（2026-11-11、§7）。Family の行が Code 交換のたびに増え続けるのを止めた |
 | 契約テストの入口 | `open func(t) storage.Store` | `open func(t) authengine.Store`（合成 Store はルートパッケージにある。ADR-0007 §2） |
 
 未解決の点（決定が要るもの。ここでは方針を変えていない）:
 
-- `Purge` は Token Family と失効済みの Grant を削除しない。Family は Code 交換のたびに 1 行増える。
 - Adapter 固有のエラーに文脈（接頭辞）を付けるかどうかは Adapter の中でも揃っていない（トランザクションの開始・コミットには付け、個々の文には付けていない）。

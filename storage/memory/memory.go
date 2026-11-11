@@ -504,5 +504,28 @@ func (s *Store) Purge(_ context.Context, now time.Time) error {
 			delete(s.refresh, h)
 		}
 	}
+
+	// 子のなくなった親（ADR-0005 §7）。トークンのない Family、Family のない失効済みの Grant の順。
+	hasToken := map[string]bool{}
+	for _, t := range s.access {
+		hasToken[t.FamilyID] = true
+	}
+	for _, t := range s.refresh {
+		hasToken[t.FamilyID] = true
+	}
+	hasFamily := map[string]bool{}
+	for id, f := range s.families {
+		if !hasToken[id] {
+			delete(s.families, id)
+			continue
+		}
+		hasFamily[f.GrantID] = true
+	}
+	for id, g := range s.grants {
+		if !g.Active() && !hasFamily[id] {
+			delete(s.grants, id)
+			delete(s.grantIdx, [2]string{g.ClientID, g.Subject})
+		}
+	}
 	return nil
 }

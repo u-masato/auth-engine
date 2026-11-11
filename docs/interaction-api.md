@@ -190,7 +190,7 @@ Grant の `scopes` は過去の同意の和集合である。Complete の `grant
 | 応答 | 条件 |
 | --- | --- |
 | `204`（本文なし） | 失効させた。既に失効済みでも `204`（冪等） |
-| `404 not_found` | その `client_id` × `subject` の Grant がない |
+| `404 not_found` | その `client_id` × `subject` の Grant がない。失効済みの Grant は、配下のトークンがすべて期限切れになった後の `Store.Purge` で消えるので、その後の再実行も `404` になる（2026-11-11 から。[ADR-0005](adr/0005-storage-port.md) §7） |
 | `400 invalid_request` | `subject` か `client_id` がない |
 
 - `subject` と `client_id` はどちらも必須。`subject` の全 Grant を一度に解除する操作はない。一覧（`GET /grants?subject=...`）から 1 件ずつ呼ぶ。
