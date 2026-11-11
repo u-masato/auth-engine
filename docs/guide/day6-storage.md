@@ -121,7 +121,7 @@ architecture.md §9 の表を、操作ごとに分解したのが次の表であ
 
 ### 5. Client の更新と削除（このブランチ）
 
-`UpdateClient` は保存済みの Profile との照合と更新を 1 操作で行う。Profile が違えば `ErrStateConflict` で、何も変えない。`ID` `Profile` `CreatedAt` は書き換えない。
+`UpdateClient` は保存済みの Profile との照合と更新を 1 操作で行う。Profile が違えば `ErrStateConflict` で、何も変えない。`ID` `Profile` `CreatedAt` とシークレットのハッシュは書き換えない（シークレットを書くのは `RotateClientSecret` だけ）。
 
 `DeleteClient` は Client の削除と同じ操作で次を行う（[storage/doc.go](../../storage/doc.go)）。
 

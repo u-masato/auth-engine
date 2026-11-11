@@ -225,8 +225,8 @@ form.inline{display:inline}
 <h2>Client Secret</h2>
 {{if .Secret}}<pre>{{.Secret}}</pre>
 <p class="muted">Store にはハッシュだけを保存する。この値はコンソールのメモリにだけあり、再起動すると消える。</p>
-{{else}}<p class="muted">コンソールは平文を知らない（登録時にしか得られない）。フローを試すときは下のフォームに入れる。</p>{{end}}
-<p class="muted">シークレットの再発行はエンジンにまだない。漏えいしたら Client を作り直す（docs/embedding.md §4）。</p>
+{{else}}<p class="muted">コンソールは平文を知らない（登録時と再発行時にしか得られない）。フローを試すときは下のフォームに入れる。</p>{{end}}
+<p class="muted">漏えいしたときや定期的な交換では、下の「危険な操作」から再発行する。</p>
 {{end}}
 
 <h2 id="start">フローを開始する</h2>
@@ -253,7 +253,36 @@ form.inline{display:inline}
   {{else}}<p class="muted">ログイン画面は Cookie セッションを持つ。2 回目以降に画面を見たいときは prompt=login にする。</p><button>認可要求を組み立てる</button>{{end}}
 </form>
 
+<h2 id="grants">利用者 <small>— この Client に対する Grant（<code>grant.Service.ListByClient</code>）</small></h2>
+{{if .Grants}}
+<div class="scroll"><table>
+<thead><tr><th>subject</th><th>付与済みの scope</th><th>状態</th><th>最後の同意</th><th></th></tr></thead>
+<tbody>
+{{range .Grants}}<tr>
+  <td><code>{{.Subject}}</code></td>
+  <td>{{join .Scopes " "}}</td>
+  <td>{{if .Active}}<span class="ok">active</span>{{else}}<span class="muted">revoked（{{date .RevokedAt}}）</span>{{end}}</td>
+  <td>{{date .UpdatedAt}}</td>
+  <td>{{if .Active}}<form method="post" action="{{clientPath $c.ID}}/grants/revoke" class="inline">
+    <input type="hidden" name="subject" value="{{.Subject}}"><input type="hidden" name="grants_after" value="{{$.GrantsAfter}}">
+    <button class="secondary" aria-label="{{.Subject}} との連携を解除する">連携を解除</button></form>{{end}}</td>
+</tr>{{end}}
+</tbody></table></div>
+<p class="muted">subject の昇順。連携を解除すると、その Grant から発行した Token Family とトークンがすべて失効する（Interaction API の <code>DELETE /grants</code> と同じ操作）。ユーザーが再び同意すれば、同じ行が active に戻る。</p>
+{{else}}<p class="muted">{{if .GrantsAfter}}これより後の Grant はない。{{else}}まだ誰も同意していない。フローを最後まで通すと、ここに subject が現れる。{{end}}</p>{{end}}
+{{if or .GrantsAfter .GrantsNext}}<nav class="pager" aria-label="利用者のページ">
+  {{if .GrantsAfter}}<a href="{{clientPath $c.ID}}#grants">« 先頭へ</a>{{else}}<span></span>{{end}}
+  {{if .GrantsNext}}<a href="{{clientPath $c.ID}}?grants_after={{.GrantsNext}}#grants">次へ »</a>{{end}}
+</nav>{{end}}
+
 <h2>危険な操作</h2>
+{{if not $c.IsPublic}}<div class="danger">
+  <p><strong>Client Secret を再発行する。</strong>新しいシークレットを生成し、旧シークレットを直ちに無効にする（<code>Client.RotateSecret</code>、<code>Store.RotateClientSecret</code>）。新旧を併用する期間はないので、Client 側の設定を差し替えるまで、トークンエンドポイントへの要求は <code>invalid_client</code> になる。発行済みのトークンと Grant はそのまま残る。漏えいへの対応なら、上の一覧から連携の解除も検討する。</p>
+  <form method="post" action="{{clientPath $c.ID}}/secret">
+    <label>確認のため client_id（<code>{{$c.ID}}</code>）を入力する<input type="text" name="confirm" autocomplete="off" required></label>
+    <button class="destructive">再発行する</button>
+  </form>
+</div>{{end}}
 <div class="danger">
   <p><strong>この Client を削除する。</strong>同じ操作で、この Client の全 Grant と配下の Token Family・トークンが失効し、Authorization Code も消える（<code>Store.DeleteClient</code>）。元に戻せない。同じ client_id で作り直しても、ユーザーは同意をやり直す。</p>
   <form method="post" action="{{clientPath $c.ID}}/delete">

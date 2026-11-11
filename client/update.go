@@ -8,7 +8,8 @@ import (
 // UpdateParams は Update の入力。登録後に変更できる項目（ADR-0004 §2 の開放項目）だけを持つ。
 //
 // ID・Profile・シークレット・CreatedAt・ClientURI は含まない。Profile は登録後に変更できず
-// （ADR-0004 §4）、用途が変わる場合は Client を作り直す。シークレットのローテーションは提供しない。
+// （ADR-0004 §4）、用途が変わる場合は Client を作り直す。シークレットの再発行は別の操作である
+// （Client.RotateSecret と Store.RotateClientSecret）。
 //
 // 部分更新ではなく全項目の置き換えである。一部だけ変えるときは Client.UpdateParams で現在値を得て、
 // 変えたい項目だけを書き換えてから渡す。
@@ -43,7 +44,8 @@ func (c *Client) UpdateParams() UpdateParams {
 //
 // 結果はコンストラクタと同じ既定値の補完と Validate を通す。Profile の規則に反する値
 // （Machine に redirect URI を与える、Web に http の redirect URI を与えるなど）は ErrInvalid。
-// 保存は Store.UpdateClient で行う。
+// 保存は Store.UpdateClient で行う。UpdateClient はシークレットを書き換えないので、読んでから
+// 保存するまでの間にシークレットが再発行されていても、古いハッシュに戻ることはない。
 func (c *Client) Update(p UpdateParams) (*Client, error) {
 	next := &Client{
 		ID:                     c.ID,

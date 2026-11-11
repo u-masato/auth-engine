@@ -13,11 +13,12 @@ go run ./cmd/server -db ./auth.db
 | 公開エンドポイント | `:8080` | `/authorize`, `/token`, `/userinfo`, `/revoke`, `/introspect`, `/jwks`, `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` |
 | Interaction API | `127.0.0.1:8081` | Interaction App 専用。外部に公開しない |
 | デモ Interaction App | `:8082` | `/login`。ユーザー名を入れて承認するだけの画面（パスワード検証なし） |
-| 開発者コンソール | `127.0.0.1:8083` | Client の一覧・登録・編集・削除とフローの手動確認（下記）。`-console-addr ""` で無効 |
+| 開発者コンソール | `127.0.0.1:8083` | Client の一覧・登録・編集・削除、シークレットの再発行、利用者（Grant）の一覧と連携解除、フローの手動確認（下記）。`-console-addr ""` で無効 |
+| 管理 API | `127.0.0.1:8084` | 運用者向けの JSON API（下記）。`AUTH_ENGINE_ADMIN_TOKEN` を設定したときだけ起動する |
 
 初回起動時に署名鍵セット（RS256 と ES256）を生成して `-keys`（既定 `keys.json`、0600）に保存し、Native クライアント `demo-cli`（redirect URI は `http://127.0.0.1/callback`、ポートは任意）を登録する。
 `-auto-approve` を付けると画面を出さず `demo-user` として全 scope を承認する（テスト・Conformance Suite 用）。
-`-clients clients.json` で Web / Native / Machine の Client を起動時に静的登録できる（形式は [conformance/clients.json](../../conformance/clients.json)）。
+`-clients clients.json` で Web / Native / Machine の Client を起動時に静的登録できる（形式は [conformance/clients.json](../../conformance/clients.json)。管理 API の `POST /clients` の本文と同じで、未知の項目があると起動を止める）。
 `-allow-insecure-issuer` は Docker 内から到達させるために localhost 以外の http Issuer を許す開発用の緩和。
 `-resources resources.json` で Resource Server（RFC 8707 の resource indicator）を静的登録する（形式は [resources.json](resources.json)。`uri` `name` `access_token_format`（`opaque` | `jwt`）`access_token_alg` `scopes`）。
 CIMD（URL 形式の `client_id` を Client ID Metadata Document で解決する。MCP クライアントの事前登録なし接続）は既定で有効（`-cimd=false` で無効）。文書をローカルの `cmd/cimd-host` から取るときは `-cimd-allow-loopback` と `-cimd-ca cimd-cert.pem` を付ける。
@@ -37,7 +38,40 @@ CIMD（URL 形式の `client_id` を Client ID Metadata Document で解決する
 
 コンソールは認証なしで Store に書き込む開発用の道具なので、loopback にだけ bind する。他のサイトからブラウザ経由で書き込まれないよう、状態を変える要求は同一オリジンに限っている（`http.CrossOriginProtection`）。フローの状態と Client Secret の平文はメモリにだけ持ち、再起動で消える（Client 自体は DB に残る）。
 
-管理画面を自分で作るときの参考にもなる。エンジンは管理用の HTTP API を持たず、一覧・登録・変更・削除は Go API（`client` のコンストラクタ、`Client.Update`、`client.Store`）で組む。本番では運用者の認証と操作の監査ログを足すこと。シークレットの再発行と、Client ごとの Grant（利用中のユーザー）の一覧はエンジンにまだない。
+Client の詳細画面では、運用の操作もできる。Client Secret の再発行（旧シークレットは直ちに無効になる）と、その Client を利用しているユーザー（Grant）の一覧、1 人ずつの連携解除である。
+
+管理画面を自分で作るときの参考にもなる。エンジンは管理用の HTTP API を持たず、これらの操作は Go API（`client` のコンストラクタ、`Client.Update`、`Client.RotateSecret`、`client.Store`、`grant.Service`）で組む。本番では運用者の認証と操作の監査ログを足すこと。
+
+## 管理 API
+
+`adminapi` は、同じ操作を JSON API にした例である。運用者のスクリプトや別の管理画面から呼ぶことを想定している。環境変数 `AUTH_ENGINE_ADMIN_TOKEN`（32 バイト以上）を設定して起動すると、`127.0.0.1:8084`（`-admin-addr`）で待ち受ける。設定しなければ起動しない。
+
+```bash
+export AUTH_ENGINE_ADMIN_TOKEN="$(openssl rand -hex 32)"
+go run ./cmd/server -db ./auth.db
+```
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /clients?after=&limit=` | 一覧（`client_id` の昇順。続きは応答の `next_after` を `after` に渡す） |
+| `POST /clients` | 登録。生成したシークレットは応答の `client_secret` で 1 回だけ返る |
+| `GET /clients/{id}` | 取得 |
+| `PUT /clients/{id}` | 開放項目の置き換え（部分更新ではない。`GET` の結果を書き換えて送る） |
+| `DELETE /clients/{id}` | 削除。Grant とトークンも失効する |
+| `POST /clients/{id}/secret` | シークレットの再発行。旧シークレットは直ちに使えなくなる |
+| `GET /clients/{id}/grants?after=&limit=` | この Client を利用しているユーザーの一覧（`subject` の昇順。失効済みも含む） |
+| `DELETE /clients/{id}/grants?subject=` | 1 人のユーザーとの連携を解除する |
+
+```bash
+A=http://127.0.0.1:8084; H="Authorization: Bearer $AUTH_ENGINE_ADMIN_TOKEN"
+curl -H "$H" -X POST $A/clients -d '{"client_id":"batch","profile":"machine","name":"Nightly Batch","scopes":["api.read"]}'
+curl -H "$H" -X POST $A/clients/batch/secret          # 新しい client_secret が返る
+curl -H "$H" "$A/clients/batch/grants"
+```
+
+Client の JSON は登録・取得・更新で同じ形で、`-clients` のファイルの 1 要素とも同じである（`adminapi.ClientSpec`）。URL 形式の `client_id`（事前登録した MCP Client）は、パスではパーセントエンコードして指定する。エラーは `{"error": "...", "error_description": "..."}` で返る。
+
+認証は事前共有の Bearer トークン 1 つで、運用者を区別しない。操作はログに `event=admin.*` で残るが、誰が行ったかは残らない。本番では `adminapi.Authenticator` を運用者ごとの認証に差し替え、公開エンドポイントとは別のネットワークに置くこと。
 
 ## クライアントでフローを実行
 
@@ -77,7 +111,8 @@ go run ./cmd/cli-client -client-id-url https://localhost:8444/demo-cli.json -mcp
 
 - `loginapp/` — Interaction API を呼ぶ Interaction App の最小実装。E2E テストからも使う。MCP Client ではホスト名表示と localhost の注意書きを出す
 - `oauthclient/` — Authorization Code + PKCE、Client Credentials、loopback redirect、RFC 8414 Discovery、`iss` 検証、Refresh、Revocation、Introspection、UserInfo、`resource`（RFC 8707）、Resource Server の発見（RFC 9728 の `WWW-Authenticate` と Protected Resource Metadata）を行う最小クライアント
-- `console/` — 開発者コンソール（Client 管理ダッシュボード）。Client の一覧・登録・編集・削除（Store を Go API で操作する運用者の画面）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
+- `console/` — 開発者コンソール（Client 管理ダッシュボード）。Client の一覧・登録・編集・削除、シークレットの再発行、利用者の一覧と連携解除（Store と `grant.Service` を Go API で操作する運用者の画面）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
+- `adminapi/` — 運用者向けの管理 API（Bearer 認証付きの JSON API）。コンソールと同じ操作を HTTP で提供する例。`ClientSpec` は `-clients` のファイルの書式でもある
 - `cmd/server/` — 上記を配線して起動する。`-resources` と CIMD の設定もここ
 - `cmd/cli-client/` — `oauthclient` を使う CLI。`-client-id-url` と `-mcp` で MCP クライアントになる
 - `cmd/mcp-server/` — `resourceserver` を組み込んだデモ MCP サーバー（Resource Server）。`mcp.go` が最小の MCP プロトコル

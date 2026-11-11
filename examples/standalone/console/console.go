@@ -2,9 +2,12 @@
 // 開発者コンソール（Client 管理ダッシュボード）である。役割は 2 つある。
 //
 //   - 運用者: Store の Client を一覧し、登録・変更・削除する（clients.go、register.go、edit.go）。
+//     シークレットを再発行する（secret.go）。Client を利用しているユーザー（Grant）を一覧し、
+//     連携を解除する（grants.go）。
 //     エンジンは管理用の HTTP API を持たないので（docs/adr/0004-client-profiles.md「影響」）、
-//     組み込む側が Go API（client のコンストラクタ、Client.Update、client.Store）で用意する。
-//     このパッケージはその一例で、Dynamic Client Registration（RFC 7591）の代わりではない。
+//     組み込む側が Go API（client のコンストラクタと遷移メソッド、client.Store、grant.Service）で用意する。
+//     このパッケージはその画面の例で、同じ操作の JSON API の例が adminapi にある。
+//     どちらも Dynamic Client Registration（RFC 7591）の代わりではない。
 //   - Relying Party: 登録した Client として oauthclient で HTTP 越しにフローを実行し、
 //     各段階の要求・応答・検証結果を仕様の節番号付きで表示する（flow.go）。
 //
@@ -37,6 +40,7 @@ import (
 
 	"github.com/u-masato/auth-engine/client"
 	"github.com/u-masato/auth-engine/examples/standalone/oauthclient"
+	"github.com/u-masato/auth-engine/grant"
 )
 
 // DefaultPageSize は一覧の 1 ページの件数の既定値。
@@ -49,8 +53,10 @@ type Config struct {
 	// BaseURL はコンソール自身の URL（例: http://127.0.0.1:8083）。redirect URI は BaseURL + "/callback"。
 	// Native の loopback 照合はポートだけを無視するので（RFC 8252 §7.3）、パスは /callback に固定する。
 	BaseURL string
-	// Store は Client の一覧・登録・変更・削除に使う。
+	// Store は Client の一覧・登録・変更・削除・シークレットの再発行に使う。
 	Store client.Store
+	// Grants は Client ごとの Grant の一覧と連携解除に使う（Engine.Grants）。
+	Grants *grant.Service
 	// Secrets は起動時に分かっている Client Secret の平文（client_id → Secret）。開始フォームに入れておく。
 	Secrets map[string]string
 	// PageSize は一覧の 1 ページの件数。0 なら DefaultPageSize。
@@ -75,8 +81,8 @@ type App struct {
 
 // New は App を作る。
 func New(cfg Config) (*App, error) {
-	if cfg.Issuer == "" || cfg.BaseURL == "" || cfg.Store == nil {
-		return nil, errors.New("console: Issuer, BaseURL and Store are required")
+	if cfg.Issuer == "" || cfg.BaseURL == "" || cfg.Store == nil || cfg.Grants == nil {
+		return nil, errors.New("console: Issuer, BaseURL, Store and Grants are required")
 	}
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	if cfg.PageSize < 1 {
@@ -110,6 +116,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /clients/{id}/edit", a.handleEditClient)
 	mux.HandleFunc("POST /clients/{id}", a.handleUpdateClient)
 	mux.HandleFunc("POST /clients/{id}/delete", a.handleDeleteClient)
+	mux.HandleFunc("POST /clients/{id}/secret", a.handleRotateSecret)
+	mux.HandleFunc("POST /clients/{id}/grants/revoke", a.handleRevokeGrant)
 	// フローの実行（Relying Party）
 	mux.HandleFunc("GET /flows", a.handleFlows)
 	mux.HandleFunc("POST /flows", a.handleStart)

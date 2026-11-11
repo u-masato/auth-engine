@@ -109,10 +109,11 @@ func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		// Profile の照合を WHERE に含め、照合と更新を 1 文で行う（ADR-0004 §4）。
+		// secret_hash は書かない（RotateClientSecret だけが書く）。
 		res, err := tx.ExecContext(ctx, `UPDATE clients SET name = ?, logo_uri = ?, policy_uri = ?, client_uri = ?, redirect_uris = ?,
-			scopes = ?, resources = ?, secret_hash = ?, access_token_ttl = ?, id_token_alg = ?, allow_insecure_localhost = ?
+			scopes = ?, resources = ?, access_token_ttl = ?, id_token_alg = ?, allow_insecure_localhost = ?
 			WHERE id = ? AND profile = ?`,
-			c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources, c.SecretHash,
+			c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources,
 			int64(c.AccessTokenTTL), c.IDTokenAlg, boolInt(c.AllowInsecureLocalhost), c.ID, string(c.Profile))
 		if err != nil {
 			return err
@@ -132,6 +133,32 @@ func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {
 			return storage.ErrNotFound
 		}
 		return storage.ErrStateConflict // Profile が違う
+	})
+}
+
+// RotateClientSecret は「シークレットを持つ Client であること」を WHERE に含め、照合と更新を 1 文で行う。
+func (s *Store) RotateClientSecret(ctx context.Context, id, secretHash string) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE clients SET secret_hash = ? WHERE id = ? AND secret_hash <> '' AND ? <> ''`,
+			secretHash, id, secretHash)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 1 {
+			return nil
+		}
+		ok, err := exists(ctx, tx, `SELECT COUNT(*) FROM clients WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return storage.ErrNotFound
+		}
+		return storage.ErrStateConflict // public クライアント、または空のハッシュ
 	})
 }
 

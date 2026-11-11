@@ -107,10 +107,11 @@ func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		// Profile の照合を WHERE に含め、照合と更新を 1 文で行う（ADR-0004 §4）。
+		// secret_hash は書かない（RotateClientSecret だけが書く）。
 		res, err := tx.ExecContext(ctx, `UPDATE clients SET name = $1, logo_uri = $2, policy_uri = $3, client_uri = $4, redirect_uris = $5,
-			scopes = $6, resources = $7, secret_hash = $8, access_token_ttl = $9, id_token_alg = $10, allow_insecure_localhost = $11
-			WHERE id = $12 AND profile = $13`,
-			c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources, c.SecretHash,
+			scopes = $6, resources = $7, access_token_ttl = $8, id_token_alg = $9, allow_insecure_localhost = $10
+			WHERE id = $11 AND profile = $12`,
+			c.Name, c.LogoURI, c.PolicyURI, c.ClientURI, redirectURIs, scopes, resources,
 			int64(c.AccessTokenTTL), c.IDTokenAlg, c.AllowInsecureLocalhost, c.ID, string(c.Profile))
 		if err != nil {
 			return err
@@ -130,6 +131,32 @@ func (s *Store) UpdateClient(ctx context.Context, c *client.Client) error {
 			return storage.ErrNotFound
 		}
 		return storage.ErrStateConflict // Profile が違う
+	})
+}
+
+// RotateClientSecret は「シークレットを持つ Client であること」を WHERE に含め、照合と更新を 1 文で行う。
+func (s *Store) RotateClientSecret(ctx context.Context, id, secretHash string) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE clients SET secret_hash = $1 WHERE id = $2 AND secret_hash <> '' AND $1 <> ''`,
+			secretHash, id)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 1 {
+			return nil
+		}
+		ok, err := exists(ctx, tx, `SELECT EXISTS (SELECT 1 FROM clients WHERE id = $1)`, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return storage.ErrNotFound
+		}
+		return storage.ErrStateConflict // public クライアント、または空のハッシュ
 	})
 }
 

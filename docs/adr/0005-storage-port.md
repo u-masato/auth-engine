@@ -1,6 +1,6 @@
 # ADR-0005: Storage Port と不変条件の保証
 
-- 状態: 採用（2026-10-24 合意）。2026-11-11 更新: §2〜§4 と §6 のメソッドの形・エラー・実現方法の記述を実装に合わせた。決定（操作単位の原子性、Port にトランザクション抽象を置かない）は変えていない。計画からの差分は末尾の「実装結果」
+- 状態: 採用（2026-10-24 合意）。2026-11-11 更新: §2〜§4 と §6 のメソッドの形・エラー・実現方法の記述を実装に合わせた。決定（操作単位の原子性、Port にトランザクション抽象を置かない）は変えていない。計画からの差分は末尾の「実装結果」。同日の追記: 運用の操作 2 つ（`RotateClientSecret`、`ListGrantsByClient`）と `UpdateClient` がシークレットを書かないこと。この追記は**草案**で、実装とともに PR に出しており、マージで確定する
 - 日付: 2026-10-24（2026-11-11 更新）
 
 ## 文脈
@@ -32,7 +32,8 @@
 | `RevokeTokenFamily(ctx, familyID, now)` | Family と配下の全トークンを失効。既に失効済みでも成功、なければ `ErrNotFound` | 1 トランザクションで Family の存在を確認（PostgreSQL は `FOR UPDATE`）→ `UPDATE access_tokens` → `UPDATE refresh_tokens` → `UPDATE token_families` |
 | `RevokeAccessToken(ctx, hash, now)` | Access Token 1 つを失効。既に失効済みでも成功、なければ `ErrNotFound`。同じ Family の Refresh Token には触れない | `UPDATE access_tokens ... WHERE hash=? AND status='active'`。0 行なら存在を調べる |
 | `UpsertGrant(ctx, candidate)` | `client_id` × `subject` の Grant を作成または更新し、保存後の Grant を返す。既存が `active` なら scope を和集合にし、`revoked` なら候補の内容で `active` に戻す（`grant.Merge`） | 1 トランザクションで既存行を読み（PostgreSQL は `FOR UPDATE`）→ `UPDATE` か `INSERT`。PostgreSQL は同時の初回作成が一意制約に当たったらやり直す |
-| `UpdateClient(ctx, client)`（2026-10-25 追加） | 保存済みの Profile が一致するときだけ開放項目を置き換える。違えば `ErrStateConflict`、なければ `ErrNotFound`。ID・Profile・作成日時は変えない（ADR-0004 §4） | `UPDATE clients SET ... WHERE id=? AND profile=?` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
+| `UpdateClient(ctx, client)`（2026-10-25 追加） | 保存済みの Profile が一致するときだけ開放項目を置き換える。違えば `ErrStateConflict`、なければ `ErrNotFound`。ID・Profile・作成日時・シークレットのハッシュは変えない（ADR-0004 §4。シークレットを除いたのは 2026-11-11。下の `RotateClientSecret` の行を参照） | `UPDATE clients SET ... WHERE id=? AND profile=?` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
+| `RotateClientSecret(ctx, clientID, secretHash)`（2026-11-11 追加。草案） | シークレットを持つ Client のハッシュだけを置き換える。保存した時点で旧シークレットは使えなくなる。なければ `ErrNotFound`、保存済みの Client がシークレットを持たない（public）か `secretHash` が空なら `ErrStateConflict`。他の項目・トークン・Grant には触れない。`UpdateClient` と分けたのは、再発行より前に読んだ Client を `UpdateClient` で保存したときに、無効にしたはずの旧シークレットが戻るのを防ぐため（読んでから書く 2 操作の競合を、意図を表す 1 メソッドで解く） | `UPDATE clients SET secret_hash=? WHERE id=? AND secret_hash<>''` の rows affected = 1 を確認。0 行なら存在を調べて `ErrNotFound` と `ErrStateConflict` を分ける |
 | `DeleteClient(ctx, clientID, now)`（2026-10-25 追加） | Client を削除し、その Client の全 Grant と配下の全 Token Family・全トークンを失効、Authorization Code を削除。なければ `ErrNotFound` で何もしない。Grant の行は失効済みとして残す。進行中の Txn には触れないので、削除後の Resume で Grant が active に戻りうる。同じ ID の作り直しは Txn の有効期限後に行う | 1 トランザクションで `DELETE FROM clients`（rows=1 確認）→ `UPDATE grants` → `UPDATE access_tokens` / `refresh_tokens` / `token_families` → `DELETE FROM authorization_codes`。PostgreSQL では Grant の行ロックで `IssueTokens` / `RotateRefreshToken`（`FOR UPDATE`）と直列になる |
 
 SQLite 側の前提:
@@ -54,6 +55,7 @@ SQLite 側の前提:
 | `GetGrant(ctx, id)` | Refresh Token の Introspection が Grant の失効を確かめるのに使う |
 | `FindGrant(ctx, clientID, subject)` | 同意スキップ判断と連携解除用。失効済みも返す（active かどうかは `grant.Service` が見る） |
 | `ListGrantsBySubject(ctx, subject)` | 連携済みアプリ一覧用。失効済みも含め、作成日時の昇順 |
+| `ListGrantsByClient(ctx, clientID, after, limit)`（2026-11-11 追加。草案） | Client の利用者の一覧用（運用者向け。プロトコル処理からは呼ばない）。失効済みも含め、Subject の昇順（バイト列としての比較）で最大 `limit` 件。`after` が空でなければ Subject がそれより大きいものだけ（`ListClients` と同じキーセットページング）。1 つの Client の Grant は利用者の数だけあるので件数を区切る。並びを Subject にしたのは、`(client_id, subject)` の一意制約の索引で絞り込みと並べ替えの両方ができるから。PostgreSQL は `COLLATE "C"` で固定し、その並びのための索引 `grants_client_subject_c` を足した（一意制約の索引は既定の照合順序なので使えない）。Client が Store にあるかは見ない（CIMD で解決した Client の Grant も引ける） |
 | `LookupAccessToken(ctx, hash)` | Access Token と、それが属する Grant を併せて返す（失効チェックの二重化） |
 | `LookupRefreshToken(ctx, hash)` | Refresh Token だけを返す。Client・subject・scope は Family を介して結びつくので、呼び出し側が `GetTokenFamily` で引く |
 | `GetTokenFamily(ctx, id)` | Refresh Token の所有者の確認、Refresh 応答の ID Token に載せる元の認証情報（`auth_time` / `amr` / `acr`）の取得 |
@@ -80,7 +82,7 @@ type Store interface {
 
 - インターフェースは **使う側（文脈パッケージ）で定義** し、ルートで合成する。Adapter は合成 `Store` を全て実装する。エンジン内部の各 Service は自分の文脈の `Store` だけを引数に取る（テストの差し替えが容易）。置き場所と依存方向の詳細は ADR-0007 §2。
 - `storage` パッケージはセンチネルエラーだけを持つ葉パッケージであり、インターフェースや型は置かない。
-- メソッド数は 20 前後に収める。これを超える場合は Port が CRUD 化している兆候として見直す（2026-11-11 時点で 23: client 5、authorization 4、grant 5、token 8、`Purge`）。
+- メソッド数は 20 前後に収める。これを超える場合は Port が CRUD 化している兆候として見直す（2026-11-11 時点で 25: client 6、authorization 4、grant 6、token 8、`Purge`。同日に運用の操作 2 つ、`RotateClientSecret` と `ListGrantsByClient` を足して 23 から増えた。どちらも Go API だけでは組めない操作で、汎用の更新・検索にはしていない）。
 - エラーは `storage.ErrNotFound`, `ErrAlreadyExists`, `ErrStateConflict`, `ErrCodeAlreadyUsed`, `ErrTokenReused`, `ErrGrantRevoked`, `ErrFamilyRevoked` のセンチネルで返し、エンジンは `errors.Is` で判別する。Adapter 固有のエラー（接続断など）はセンチネルに写さず、そのまま（文脈を付けてもよい）返す。エンジンは内部障害として扱う。
 
 ### 5. 秘密値の保存
@@ -118,7 +120,8 @@ In-Memory Store（`storage/memory`）はエンジンの単体テスト専用と�
 | `RotateRefreshToken` | `(ctx, oldHash, next, now)`。`ErrTokenReused` と Family ID を返す | `(ctx, oldHash, next, access, now)`。新しい Access Token も同じ操作で保存する。Family ID は返さない（呼び出し側は Rotation の前に `LookupRefreshToken` で Family を知っている）。`ErrFamilyRevoked` と `ErrGrantRevoked` を足した |
 | `UpsertGrant` | `(ctx, clientID, subject, scopes, claims)` | `(ctx, candidate)`。候補の Grant を渡し、既存との統合は `grant.Merge` に置いた（Adapter が共通で使う）。失効済みの Grant は候補の内容で active に戻す |
 | `LookupRefreshToken` | Grant の状態も併せて返す | Refresh Token だけを返す。Family は `GetTokenFamily`、Grant は `GetGrant` で引く。Rotation の判定は `RotateRefreshToken` の中で Family と Grant の状態を見るので、二重化はそこで行う |
-| 表になかったメソッド | — | `GetGrant`、`RevokeAccessToken`（M1 タスク 3）、`GetTokenFamily`（M2 タスク 4・5）、`ListGrantsBySubject`（M2 タスク 6）、`UpdateClient`、`DeleteClient`（2026-10-25）、`ListClients`（2026-11-10） |
+| 表になかったメソッド | — | `GetGrant`、`RevokeAccessToken`（M1 タスク 3）、`GetTokenFamily`（M2 タスク 4・5）、`ListGrantsBySubject`（M2 タスク 6）、`UpdateClient`、`DeleteClient`（2026-10-25）、`ListClients`（2026-11-10）、`RotateClientSecret`、`ListGrantsByClient`（2026-11-11。草案） |
+| `UpdateClient` が書く項目 | 開放項目とシークレットのハッシュ（`Client` をそのまま保存していた） | シークレットのハッシュは書かない（2026-11-11）。シークレットの再発行を足すと、古い値の保存で旧シークレットが戻る経路になるため、書き込みを `RotateClientSecret` だけにした |
 | センチネル | 5 種を列挙 | 7 種。`ErrAlreadyExists`（作成の重複）と `ErrFamilyRevoked`（失効済みの Family への操作）は M1 からあったが、列挙に載っていなかった |
 | SQLite の書き込み | `SQLITE_BUSY` 時のリトライ | プロセス内の Mutex で直列化（リトライは実装していない） |
 | 失効の `UPDATE` の順 | `grants` → `refresh_tokens` → `access_tokens` | `grants` → `access_tokens` → `refresh_tokens` → `token_families`（Family にも状態を持たせたため） |

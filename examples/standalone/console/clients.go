@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/u-masato/auth-engine/client"
+	"github.com/u-masato/auth-engine/grant"
 	"github.com/u-masato/auth-engine/storage"
 )
 
@@ -124,6 +125,11 @@ type clientPage struct {
 	// CodeFlow は認可エンドポイントを経由するフローを使う Client か（Machine 以外）。
 	CodeFlow bool
 	Scope    string // 開始フォームの初期値
+
+	// Grants はこの Client に対する Grant の 1 ページ分（Subject の昇順、失効済みも含む）。
+	Grants []*grant.Grant
+	// GrantsAfter はこのページの開始位置（空なら先頭）、GrantsNext は次のページの開始位置（なければ空）。
+	GrantsAfter, GrantsNext string
 }
 
 // handleClient は Client の詳細。Profile が固定する項目と開放項目を分けて見せ、ここからフローを開始する。
@@ -132,10 +138,28 @@ func (a *App) handleClient(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// コンソールの外（管理 API など）で再発行されていたら、覚えている平文はもう使えない。
+	// 古い値を表示して開始フォームに入れないよう、Store のハッシュと合わなければ捨てる。
+	if s := a.knownSecret(c.ID); s != "" && !c.VerifySecret(s) {
+		a.forgetSecret(c.ID)
+	}
+	q := r.URL.Query()
 	p := clientPage{Layout: a.layout(c.Name, "clients"), Client: c, Rules: profileRules(c),
 		Secret: a.knownSecret(c.ID), Usable: a.usable(c), CodeFlow: c.Allows(client.GrantAuthorizationCode),
-		Scope: strings.Join(c.Scopes, " ")}
-	switch r.URL.Query().Get("notice") {
+		Scope: strings.Join(c.Scopes, " "), GrantsAfter: q.Get("grants_after")}
+	// 次のページがあるかを知るために 1 件多く読む（一覧画面と同じ）
+	gs, err := a.cfg.Grants.ListByClient(r.Context(), c.ID, p.GrantsAfter, a.cfg.PageSize+1)
+	if err != nil {
+		a.logger.Error("console: list grants", "client_id", c.ID, "error", err)
+		a.renderError(w, http.StatusInternalServerError, "Grant の一覧を取得できない: "+err.Error())
+		return
+	}
+	if len(gs) > a.cfg.PageSize {
+		gs = gs[:a.cfg.PageSize]
+		p.GrantsNext = gs[len(gs)-1].Subject
+	}
+	p.Grants = gs
+	switch q.Get("notice") {
 	case "registered":
 		p.Notice = "登録した。"
 		if p.Secret != "" {
@@ -143,6 +167,10 @@ func (a *App) handleClient(w http.ResponseWriter, r *http.Request) {
 		}
 	case "updated":
 		p.Notice = "変更を保存した。発行済みのトークンはそのまま有効で、次の要求から新しい設定が使われる。"
+	case "rotated":
+		p.Notice = "Client Secret を再発行した。旧シークレットはもう使えない。新しい平文が得られるのは今だけなので、控えてから Client 側の設定を差し替える。発行済みのトークンと Grant はそのまま残っている。"
+	case "grant-revoked":
+		p.Notice = "subject " + q.Get("subject") + " との連携を解除した。この Grant から発行したトークンはすべて失効している。"
 	}
 	a.render(w, "client", p, http.StatusOK)
 }

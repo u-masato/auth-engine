@@ -62,6 +62,29 @@ func (s *Store) ListGrantsBySubject(ctx context.Context, subject string) ([]*gra
 	return out, rows.Err()
 }
 
+// ListGrantsByClient は subject の昇順で返す。subject 列の照合順序は既定の BINARY なので、バイト列としての
+// 比較になる。(client_id, subject) の一意制約の索引が、絞り込みと並べ替えの両方に使われる。
+func (s *Store) ListGrantsByClient(ctx context.Context, clientID, after string, limit int) ([]*grant.Grant, error) {
+	out := []*grant.Grant{}
+	if limit < 1 {
+		return out, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+grantColumns+` FROM grants
+		WHERE client_id = ? AND subject > ? ORDER BY subject LIMIT ?`, clientID, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		g, err := scanGrant(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // UpsertGrant は (client_id, subject) の一意制約を前提に、既存があれば grant.Merge の結果で更新する。
 func (s *Store) UpsertGrant(ctx context.Context, candidate *grant.Grant) (*grant.Grant, error) {
 	var result *grant.Grant

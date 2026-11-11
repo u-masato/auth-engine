@@ -143,3 +143,39 @@ func ExampleClient_Update() {
 	// Output:
 	// web [https://app.example.com/oauth/callback] true
 }
+
+// ExampleClient_RotateSecret は Client Secret を再発行する。新しい平文は戻り値でしか得られず、
+// 保存した時点で旧シークレットは使えなくなる。発行済みのトークンと Grant はそのまま残る。
+func ExampleClient_RotateSecret() {
+	ctx := context.Background()
+	store := memory.New()
+	c, oldSecret, err := client.NewMachine(client.MachineParams{ID: "batch", Name: "Nightly Batch", Scopes: []string{"jobs:run"}}, time.Now())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := store.CreateClient(ctx, c); err != nil {
+		log.Fatal(err)
+	}
+
+	cur, err := store.GetClient(ctx, "batch")
+	if err != nil {
+		log.Fatal(err)
+	}
+	next, newSecret, err := cur.RotateSecret() // public クライアントでは client.ErrInvalid
+	if err != nil {
+		log.Fatal(err)
+	}
+	// シークレットだけを書き換える専用の操作。UpdateClient はシークレットに触れない
+	if err := store.RotateClientSecret(ctx, next.ID, next.SecretHash); err != nil {
+		log.Fatal(err)
+	}
+
+	got, err := store.GetClient(ctx, "batch")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("old:", got.VerifySecret(string(oldSecret)), "new:", got.VerifySecret(string(newSecret)))
+
+	// Output:
+	// old: false new: true
+}

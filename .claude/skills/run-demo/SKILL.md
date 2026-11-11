@@ -10,7 +10,7 @@ description: auth-engine のデモサーバー（examples/standalone の server 
 
 - `go run` をバックグラウンドにすると子プロセスの PID が取れず止められなくなる。スクリプトは
   先に `go build` してバイナリを直接起動し、PID をファイルに残す。
-- 起動は 4 ポート（既定 8080 / 8081 / 8082 / 8083）を同時に取る。空きを先に確認しないと、片方だけ
+- 起動は 5 ポート（既定 8080 / 8081 / 8082 / 8083 / 8084）を同時に取る。空きを先に確認しないと、片方だけ
   取れて失敗した理由が分かりにくい。
 - DB・署名鍵・ログを `examples/standalone/.demo/`（gitignore 済み）に集めるので、作業ツリーを
   汚さず、`reset` で初期状態に戻せる。
@@ -39,13 +39,15 @@ MCP の同意画面には client_id のホスト名と redirect 先のホスト�
 公式クライアント（MCP Inspector）で試すときは `conformance/mcp-inspector.sh tools/list`（手順は docs/mcp-interop.md）。
 `start` の残りの引数はそのまま server に渡る（`-clients ../../conformance/clients.json` など）。
 ポートを変えるときは `DEMO_PORT_BASE=8090 $S start` のように環境変数で指定する。
-公開 = base、Interaction API = base+1、ログイン画面 = base+2、開発者コンソール = base+3 で、issuer・login-url・console-url も追従する。
+公開 = base、Interaction API = base+1、ログイン画面 = base+2、開発者コンソール = base+3、管理 API = base+4 で、issuer・login-url・console-url も追従する。
+管理 API（`adminapi`。Client と Grant を操作する JSON API）の Bearer トークンは、`start` が初回に生成して `.demo/admin-token` に置く。
+`start` と `status` の出力に curl の例が出る（`curl -H "Authorization: Bearer $(cat .../admin-token)" http://127.0.0.1:8084/clients`）。
 コンソールで登録した Web Client の redirect URI はポート込みの完全一致なので、ポートを変えると使えなくなる。
 
 ## 判断のしかた
 
 **手動で確認したい人には開発者コンソール（`http://127.0.0.1:8083`）を案内する。** Client の一覧・登録
-（Web / Native / Machine）・編集・削除、認可要求の組み立て、コールバックでの state / iss 検証、Code 交換、
+（Web / Native / Machine）・編集・削除、シークレットの再発行、利用者（Grant）の一覧と連携解除、認可要求の組み立て、コールバックでの state / iss 検証、Code 交換、
 ID Token の署名と claims の検証、UserInfo・Refresh・Revoke・Introspect が 1 画面で順に見られる。
 ブラウザペインがあればそこで開く。
 
@@ -82,5 +84,5 @@ auto_approve が出る。クライアント登録や鍵の生成も起動ログ�
 
 作業が終わっても、ユーザーが「止めて」と言うまでサーバーは起動したままでよい。続けて試す
 ことが多いからだ。ただし終了報告には起動中であることと止め方を必ず書く。クライアントの登録内容を
-変えたいときは、開発者コンソールの編集・削除を使う。`-clients` の JSON は既にある client_id を
+変えたいときは、開発者コンソールの編集・削除か、管理 API を使う。`-clients` の JSON は既にある client_id を
 上書きしないので、ファイルの内容で作り直したいときは `reset` で DB を作り直す。

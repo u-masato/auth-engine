@@ -225,7 +225,7 @@ curl -s http://localhost:8090/.well-known/oauth-protected-resource/mcp
 
 次の変更を入れるとしたら、どのパッケージのどの関数を変え、どの ADR を直し、どの不変条件（[付録](appendix-invariants.md)）に触れるかを書き出す。コードは書かなくてよい。
 
-- (a) Web Profile の Client に、シークレットのローテーション（新旧 2 本を一時的に有効にする）を足す
+- (a) Web Profile の Client のシークレットの再発行（`Client.RotateSecret`。保存した時点で旧シークレットが無効になる）に、新旧 2 本を一時的に有効にする併用期間を足す（[ADR-0004](../adr/0004-client-profiles.md) §8 が見送った理由も読むこと）
 - (b) Refresh Token の再利用を検知したら、Family に加えて Grant も失効させる「厳格モード」を足す
 - (c) CIMD で解決した Client をプロセス内キャッシュではなく Store に保存して、複数インスタンスで共有する
 

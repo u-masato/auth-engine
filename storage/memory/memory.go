@@ -121,8 +121,22 @@ func (s *Store) UpdateClient(_ context.Context, c *client.Client) error {
 		return storage.ErrStateConflict
 	}
 	next := clone(c)
-	next.CreatedAt = cur.CreatedAt
+	next.CreatedAt, next.SecretHash = cur.CreatedAt, cur.SecretHash
 	s.clients[c.ID] = next
+	return nil
+}
+
+func (s *Store) RotateClientSecret(_ context.Context, id, secretHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.clients[id]
+	if !ok {
+		return storage.ErrNotFound
+	}
+	if cur.SecretHash == "" || secretHash == "" {
+		return storage.ErrStateConflict
+	}
+	cur.SecretHash = secretHash
 	return nil
 }
 
@@ -264,6 +278,26 @@ func (s *Store) ListGrantsBySubject(_ context.Context, subject string) ([]*grant
 		}
 		return out[i].ID < out[j].ID
 	})
+	return out, nil
+}
+
+func (s *Store) ListGrantsByClient(_ context.Context, clientID, after string, limit int) ([]*grant.Grant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	matched := []*grant.Grant{}
+	for _, g := range s.grants {
+		if g.ClientID == clientID && g.Subject > after {
+			matched = append(matched, g)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Subject < matched[j].Subject })
+	out := []*grant.Grant{}
+	for _, g := range matched {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, clone(g))
+	}
 	return out, nil
 }
 

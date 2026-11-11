@@ -12,8 +12,11 @@
 # （cmd/cimd-host、base+11、自己署名 TLS）も起動する。認可サーバーには -resources（MCP サーバーの登録）、
 # -cimd-allow-loopback、-cimd-ca（cimd-host の証明書）を渡す。
 #
+# 管理 API（adminapi、base+4）も起動する。Bearer トークンは初回に生成して DEMO_DIR/admin-token に置き、
+# 環境変数 AUTH_ENGINE_ADMIN_TOKEN でサーバーに渡す（コマンドラインには出さない）。
+#
 # 環境変数: DEMO_PORT_BASE（既定 8080。公開=base, Interaction=base+1, login=base+2, console=base+3,
-#                           MCP サーバー=base+10, CIMD 文書=base+11）
+#                           管理 API=base+4, MCP サーバー=base+10, CIMD 文書=base+11）
 #           DEMO_CIMD_REDIRECT_URIS（CIMD 文書の redirect_uris。既定は cli-client の loopback と MCP Inspector の
 #                           CLI / TUI（http://127.0.0.1:6276/oauth/callback）と Web（http://localhost:6274/oauth/callback））
 #           DEMO_DIR（既定 examples/standalone/.demo。DB・鍵・ログ・PID をここに置く）
@@ -26,6 +29,7 @@ PUBLIC_PORT=$PORT_BASE
 INTERACTION_PORT=$((PORT_BASE + 1))
 LOGIN_PORT=$((PORT_BASE + 2))
 CONSOLE_PORT=$((PORT_BASE + 3))
+ADMIN_PORT=$((PORT_BASE + 4))
 MCP_PORT=$((PORT_BASE + 10))
 CIMD_PORT=$((PORT_BASE + 11))
 DEMO_DIR="${DEMO_DIR:-$APP/.demo}"
@@ -42,6 +46,8 @@ CIMD_LOG="$DEMO_DIR/cimd-host.log"
 CIMD_CERT="$DEMO_DIR/cimd-cert.pem"
 CIMD_KEY="$DEMO_DIR/cimd-key.pem"
 RESOURCES_JSON="$DEMO_DIR/resources.json"
+ADMIN_TOKEN_FILE="$DEMO_DIR/admin-token"
+ADMIN_URL="http://127.0.0.1:$ADMIN_PORT"
 MCP_URL="http://localhost:$MCP_PORT/mcp"
 CIMD_URL="https://localhost:$CIMD_PORT"
 CLIENT_ID_URL="$CIMD_URL/demo-cli.json"
@@ -84,6 +90,8 @@ print_summary() {
   echo "console:           $CONSOLE_URL  (Client 登録とフローの手動確認はここから)"
   echo "login (demo app):  $LOGIN_URL"
   echo "interaction api:   http://127.0.0.1:$INTERACTION_PORT (loginapp 専用。外部に出さない)"
+  echo "admin api:         $ADMIN_URL (Bearer トークンは $ADMIN_TOKEN_FILE)"
+  echo "                   例: curl -H \"Authorization: Bearer \$(cat $ADMIN_TOKEN_FILE)\" $ADMIN_URL/clients"
   echo "auto_approve:      $(auto_approve_on && echo true || echo false)"
   echo "pid:               $(server_pid)"
   echo "log:               $LOG"
@@ -120,7 +128,7 @@ cmd_start() {
   fi
   rm -f "$PID_FILE"
   local busy=0 p
-  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT" "$MCP_PORT" "$CIMD_PORT"; do
+  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT" "$ADMIN_PORT" "$MCP_PORT" "$CIMD_PORT"; do
     local u; u=$(port_users "$p")
     if [ -n "$u" ]; then echo "port $p is in use by: $u"; busy=1; fi
   done
@@ -139,12 +147,17 @@ cmd_start() {
 
   # 2. 認可サーバー。MCP サーバーを resource として登録し（JWT Access Token）、CIMD は loopback の cimd-host から取る
   printf '[\n  {\n    "uri": "%s",\n    "name": "Demo MCP Server",\n    "access_token_format": "jwt",\n    "scopes": ["mcp:read", "mcp:write"]\n  }\n]\n' "$MCP_URL" >| "$RESOURCES_JSON"
-  nohup "$BIN" \
+  # 管理 API のトークンは初回に生成する（256 bit。ファイルは自分だけが読める）
+  if [ ! -s "$ADMIN_TOKEN_FILE" ]; then
+    (umask 077 && openssl rand -hex 32 >| "$ADMIN_TOKEN_FILE")
+  fi
+  AUTH_ENGINE_ADMIN_TOKEN="$(cat "$ADMIN_TOKEN_FILE")" nohup "$BIN" \
     -db "$DEMO_DIR/auth.db" -keys "$DEMO_DIR/keys.json" \
     -issuer "$ISSUER" -public-addr ":$PUBLIC_PORT" \
     -interaction-addr "127.0.0.1:$INTERACTION_PORT" \
     -login-addr ":$LOGIN_PORT" -login-url "$LOGIN_URL" \
     -console-addr "127.0.0.1:$CONSOLE_PORT" -console-url "$CONSOLE_URL" \
+    -admin-addr "127.0.0.1:$ADMIN_PORT" \
     -resources "$RESOURCES_JSON" -cimd-allow-loopback -cimd-ca "$CIMD_CERT" \
     "$@" >"$LOG" 2>&1 &
   echo $! >"$PID_FILE"
@@ -180,7 +193,7 @@ cmd_status() {
   fi
   echo "not running"
   local p
-  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT" "$MCP_PORT" "$CIMD_PORT"; do
+  for p in "$PUBLIC_PORT" "$INTERACTION_PORT" "$LOGIN_PORT" "$CONSOLE_PORT" "$ADMIN_PORT" "$MCP_PORT" "$CIMD_PORT"; do
     local u; u=$(port_users "$p"); [ -n "$u" ] && echo "port $p is in use by: $u (このスクリプトが起動したものではない)"
   done
   return 0
@@ -190,8 +203,8 @@ cmd_logs() { tail -n "${1:-50}" "$LOG"; }
 
 cmd_reset() {
   cmd_stop
-  rm -f "$DEMO_DIR"/auth.db "$DEMO_DIR"/auth.db-wal "$DEMO_DIR"/auth.db-shm "$DEMO_DIR"/keys.json "$CIMD_CERT" "$CIMD_KEY" "$FLOW_OUT"
-  echo "removed auth.db, keys.json and the cimd-host certificate under ${DEMO_DIR}（次の start で再生成。demo-cli も再登録される）"
+  rm -f "$DEMO_DIR"/auth.db "$DEMO_DIR"/auth.db-wal "$DEMO_DIR"/auth.db-shm "$DEMO_DIR"/keys.json "$CIMD_CERT" "$CIMD_KEY" "$FLOW_OUT" "$ADMIN_TOKEN_FILE"
+  echo "removed auth.db, keys.json, the cimd-host certificate and the admin token under ${DEMO_DIR}（次の start で再生成。demo-cli も再登録される）"
 }
 
 # cli-client を起動し、認可 URL を得る。-auto-approve 起動のサーバーなら curl で承認まで進めて結果を出す。
