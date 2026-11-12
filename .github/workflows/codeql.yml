@@ -1,0 +1,40 @@
+name: CodeQL
+
+# GitHub の CodeQL で Go のコードを静的解析し、結果を Code scanning に載せる。
+# staticcheck（ci.yml）は正しさと書き方、CodeQL はテイント解析（外部入力がリダイレクト先やログに流れるか）を見る。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 20 * * 0" # 毎週月曜 05:23（JST）
+
+permissions:
+  contents: read
+
+# Action はタグの付け替えで中身が変わらないようにコミット SHA で固定する（コメントは対応するタグ）
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: "**/go.sum"
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: go
+          build-mode: manual
+          queries: security-extended
+      # go.work の全モジュールを明示的にビルドする（autobuild の推測に頼らない）
+      - run: |
+          for m in . ./adapters/sqlite ./adapters/postgres ./examples/standalone ./tests; do
+            (cd "$m" && go build ./...) || exit 1
+          done
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:go"

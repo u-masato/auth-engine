@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 脆弱性の報告（非公開）
+    url: https://github.com/u-masato/auth-engine/security/advisories/new
+    about: Code・トークンの漏洩やなりすましにつながる問題は、公開の issue ではなくこちらから報告してください。
