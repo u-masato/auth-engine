@@ -173,7 +173,8 @@ func New(ctx context.Context, cfg Config) (*Tour, error) {
 	// --- Client（Notes Web）---
 	app := &clientApp{issuer: cfg.IssuerURL, baseURL: cfg.ClientURL, resourceURL: cfg.ResourceURL,
 		clientID: web.ID, clientSecret: string(webSecret), verify: cfg.Verify, ports: ports,
-		rec: rec, hc: taggedClient(ClientApp), logger: cfg.Logger, sessions: map[string]*session{}}
+		secure: strings.HasPrefix(cfg.ClientURL, "https://"), rec: rec, hc: taggedClient(ClientApp),
+		logger: cfg.Logger, sessions: map[string]*session{}}
 
 	return &Tour{
 		Client:         app.handler(),

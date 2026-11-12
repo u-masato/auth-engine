@@ -27,6 +27,7 @@ type clientApp struct {
 	issuer, baseURL, resourceURL string
 	clientID, clientSecret       string
 	verify                       string
+	secure                       bool // セッション Cookie に Secure を付けるか（Client の URL が https のとき）
 	ports                        map[string]string
 	rec                          *Recorder
 	hc                           *http.Client
@@ -105,9 +106,19 @@ func (a *clientApp) session(w http.ResponseWriter, r *http.Request) *session {
 	id := base64.RawURLEncoding.EncodeToString(b)
 	s := &session{}
 	a.sessions[id] = s
-	// SameSite=Lax: 認可サーバーからのリダイレクト（トップレベルの GET）でコールバックに届く必要がある
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: id, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, a.cookie(id, 0))
 	return s
+}
+
+// cookie はセッション Cookie を組み立てる。maxAge が負なら削除になる。
+//
+// SameSite=Lax にするのは、認可サーバーからのリダイレクト（トップレベルの GET）でコールバックに
+// 届く必要があるため。Secure は Client の URL が https のときに付ける。既定の http://localhost では
+// 付けない（付けると、http では Cookie を送らないブラウザでセッションが続かない）。本番の Client は
+// https で動かし、必ず Secure を付けること。
+func (a *clientApp) cookie(value string, maxAge int) *http.Cookie {
+	return &http.Cookie{Name: sessionCookie, Value: value, Path: "/", MaxAge: maxAge,
+		HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode}
 }
 
 // metadata は認可サーバーのメタデータ（RFC 8414）を取得し、以後はそれを使う。失敗は覚えない。
@@ -316,7 +327,7 @@ func (a *clientApp) reset(w http.ResponseWriter, r *http.Request) {
 		delete(a.sessions, c.Value)
 		a.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, a.cookie("", -1))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

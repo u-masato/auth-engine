@@ -194,3 +194,22 @@ func TestNewRejectsUnknownVerify(t *testing.T) {
 		t.Fatalf("an unknown Verify must be rejected: %v", err)
 	}
 }
+
+// セッション Cookie の Secure は Client の URL のスキームに従う。http://localhost のデモでは付けず、
+// https で動かすときは付ける。
+func TestSessionCookieSecureFollowsScheme(t *testing.T) {
+	for scheme, want := range map[string]bool{"http": false, "https": true} {
+		tr, err := tour.New(t.Context(), tour.Config{ClientURL: scheme + "://localhost:1", IssuerURL: scheme + "://localhost:2",
+			InteractionAPIURL: "http://127.0.0.1:3", LoginURL: scheme + "://localhost:4", ResourceURL: scheme + "://localhost:5",
+			Logger: slog.New(slog.DiscardHandler)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		tr.Client.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		cookies := rec.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Secure != want || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode {
+			t.Errorf("%s: session cookie = %+v, want Secure=%v with HttpOnly and SameSite=Lax", scheme, cookies, want)
+		}
+	}
+}
