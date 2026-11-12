@@ -1,0 +1,405 @@
+{{define "head"}}<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.}} · auth-engine 境界ツアー</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--panel:#fff;--ink:#182538;--muted:#546478;--line:#d6dfe8;--code:#eef1f5;
+  --blue:#205ac9;--blue-bg:#eef4ff;--on-blue:#fff;--teal:#086e63;--teal-bg:#eaf7f3;--orange:#a95811;--orange-bg:#fff4e7;
+  --hot:#c2255c;--hot-bg:#fde8ef;--ok:#1a7f37;--ok-bg:#e8f6ec;--ng:#c62828;--ng-bg:#fdecec}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--panel:#1b2129;--ink:#e8edf3;--muted:#9aa8b8;--line:#313b48;--code:#252d38;
+  --blue:#7fb0ff;--blue-bg:#18263d;--on-blue:#0b1220;--teal:#5fd3c4;--teal-bg:#132b29;--orange:#f0b06a;--orange-bg:#2e2416;
+  --hot:#ff7aa8;--hot-bg:#3b1826;--ok:#56c271;--ok-bg:#16301d;--ng:#ff7b72;--ng-bg:#3a1d1d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif}
+main{max-width:1280px;margin:auto;padding:28px 24px 64px}
+h1,h2,h3,p{margin:0}
+h1{font-size:26px;line-height:1.35;letter-spacing:-.02em;margin:6px 0 8px}
+h2{font-size:17px;line-height:1.5}
+h3{font-size:15px}
+p{color:var(--muted)}
+a{color:var(--blue)}
+code,pre{font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+code{overflow-wrap:anywhere}
+pre{margin:8px 0 0;padding:10px 12px;background:var(--code);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:22rem;overflow:auto}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;color:var(--blue)}
+.lead{max-width:60rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.card+.card{margin-top:18px}
+.cols{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr);gap:22px;align-items:start;margin-top:22px}
+.sticky{position:sticky;top:14px}
+@media (max-width:1000px){.cols{grid-template-columns:minmax(0,1fr)}.sticky{position:static}}
+button,.button{font:inherit;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--blue);background:var(--blue);color:var(--on-blue);cursor:pointer;text-decoration:none;display:inline-block}
+button.quiet{background:transparent;color:var(--blue)}
+button.plain{background:transparent;border-color:var(--line);color:var(--ink);font-weight:500}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+input[type=text]{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:0}
+.badge{display:inline-block;font:600 12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;padding:0 8px;border-radius:999px;background:var(--code);color:var(--muted);white-space:nowrap}
+.badge.s2,.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.badge.s3{background:var(--blue-bg);color:var(--blue)}
+.badge.s4,.badge.s5,.badge.ng{background:var(--ng-bg);color:var(--ng)}
+.hint{margin-top:10px;padding:8px 12px;border-left:3px solid var(--teal);background:var(--teal-bg);color:var(--ink);font-size:14px;border-radius:0 8px 8px 0}
+[hidden]{display:none!important}
+
+/* 図 */
+.diagram{display:block;width:100%;height:auto}
+.diagram .edge{fill:none;stroke:var(--line);stroke-width:2;stroke-linejoin:round}
+.diagram .edge.back{stroke-dasharray:6 5}
+.diagram .edge.on{stroke:var(--hot);stroke-width:4}
+.diagram .node rect{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+.diagram .node.n-engine rect{fill:var(--blue-bg);stroke:var(--blue)}
+.diagram .node.n-interaction rect{fill:var(--teal-bg);stroke:var(--teal)}
+.diagram .node.n-store rect{fill:var(--orange-bg);stroke:var(--orange)}
+.diagram .node.src rect{stroke:var(--hot);stroke-width:3}
+.diagram .node.dst rect{stroke:var(--hot);stroke-width:3;fill:var(--hot-bg)}
+.diagram .nm{font-size:15px;font-weight:650;fill:var(--ink);text-anchor:middle}
+.diagram .sub{font-size:11px;fill:var(--muted);text-anchor:middle}
+.diagram .lbl{font-size:11px;fill:var(--muted)}
+.diagram .here{display:none}
+.diagram .here rect{fill:var(--ink);stroke:none}
+.diagram .here text{font-size:10.5px;font-weight:700;fill:var(--panel);text-anchor:middle}
+.diagram[data-here=client] .here-client,.diagram[data-here=interaction] .here-interaction{display:block}
+.diagram .dot{fill:var(--hot);stroke:var(--panel);stroke-width:2}
+.caption{min-height:4.6rem;margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
+.caption strong{display:block;color:var(--ink)}
+.caption span{display:block;color:var(--muted);font-size:14px}
+.player{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.player .pos{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+
+/* Client の操作 */
+.state{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:8px 0 14px;font-size:14px;color:var(--muted)}
+.actions{display:grid;gap:10px}
+.action{display:grid;grid-template-columns:11.5rem minmax(0,1fr);gap:4px 14px;align-items:center}
+.action button{width:100%}
+.action small{color:var(--muted);font-size:13px;line-height:1.5}
+.action .write{display:flex;gap:8px}
+.action .write input{flex:1}
+@media (max-width:560px){.action{grid-template-columns:minmax(0,1fr)}}
+.result{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.result header{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+details.peek{margin-top:14px;font-size:14px}
+details.peek summary{cursor:pointer;color:var(--muted)}
+
+/* タイムライン */
+.step{border-top:1px solid var(--line);padding:10px 0 4px}
+.step:first-of-type{border-top:0}
+.step>summary{cursor:pointer;font-weight:650;list-style-position:outside;padding:2px 0}
+.step>summary small{font-weight:400;color:var(--muted);margin-left:6px}
+.step ol{list-style:none;margin:8px 0 6px;padding:0}
+.ev{display:grid;grid-template-columns:1.6rem minmax(0,1fr) auto;gap:2px 8px;align-items:center;width:100%;text-align:left;
+  background:transparent;color:inherit;border:1px solid transparent;border-radius:10px;padding:7px 9px;font-weight:400}
+.ev:hover{background:var(--code)}
+.ev[aria-current=true]{border-color:var(--hot);background:var(--hot-bg)}
+.ev .idx{font:600 12px ui-monospace,monospace;color:var(--muted)}
+.ev .hop{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:13px}
+.ev .req{grid-column:2;color:var(--ink)}
+.ev .note{grid-column:2/4;color:var(--muted);font-size:13px;line-height:1.55}
+.chip{font-size:12px;font-weight:650;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);white-space:nowrap}
+.chip.c-engine{border-color:var(--blue);color:var(--blue);background:var(--blue-bg)}
+.chip.c-interaction{border-color:var(--teal);color:var(--teal);background:var(--teal-bg)}
+.chip.c-store{border-color:var(--orange);color:var(--orange);background:var(--orange-bg)}
+.detail{margin:2px 0 10px 2.2rem;padding:10px 12px;border-left:2px solid var(--hot);font-size:13px}
+.detail h4{margin:8px 0 2px;font-size:12px;letter-spacing:.06em;color:var(--muted)}
+.detail h4:first-child{margin-top:0}
+.detail table{border-collapse:collapse;width:100%}
+.detail th,.detail td{text-align:left;vertical-align:top;padding:2px 10px 2px 0;border:0}
+.detail th{width:9.5rem;font-weight:500;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.detail td pre{margin:0}
+.empty{padding:14px 0;color:var(--muted)}
+
+/* Interaction App の画面 */
+.where{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:10px 14px;border-radius:10px;background:var(--teal-bg);border:1px solid var(--teal);color:var(--ink);margin-top:14px}
+.where strong{color:var(--teal)}
+.consent label{display:block;margin:12px 0}
+.consent .scope{display:grid;grid-template-columns:auto 1fr;gap:0 10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin:8px 0}
+.consent .scope small{grid-column:2;color:var(--muted)}
+.consent .buttons{display:flex;gap:10px;margin-top:16px}
+.kv{font-size:14px;color:var(--muted);margin-top:8px}
+</style></head><body><main>{{end}}
+
+{{define "foot"}}</main></body></html>{{end}}
+
+{{/* 境界図。docs の説明資料（入出力と責務の境界）と同じ配置。線の id は両端の名前を辞書順に並べたもの */}}
+{{define "diagram"}}
+<svg class="diagram" id="diagram" data-here="{{.Here}}" viewBox="0 0 720 424" role="img" aria-labelledby="dg-title dg-desc" xmlns="http://www.w3.org/2000/svg">
+<title id="dg-title">Client、ブラウザ、auth-engine、Interaction App、Resource Server、Store の関係</title>
+<desc id="dg-desc">ブラウザは Client、auth-engine、Interaction App を行き来する。Client は auth-engine とトークンをやり取りし、Resource Server を直接呼ぶ。Interaction App はバックチャネルで auth-engine を呼ぶ。Resource Server は auth-engine に公開鍵やトークンの状態を問い合わせる。auth-engine は Store に状態を保存する。</desc>
+<g>
+<path class="edge" id="e-browser-client" data-a="browser" d="M 280 45 H 94 V 176"/>
+<path class="edge" id="e-browser-engine" data-a="browser" d="M 360 76 V 176"/>
+<path class="edge" id="e-browser-interaction" data-a="browser" d="M 440 45 H 546"/>
+<path class="edge" id="e-client-engine" data-a="client" d="M 174 207 H 280"/>
+<path class="edge" id="e-engine-resource" data-a="engine" d="M 440 207 H 546"/>
+<path class="edge back" id="e-engine-interaction" data-a="engine" d="M 410 176 V 126 H 626 V 76"/>
+<path class="edge" id="e-client-resource" data-a="client" d="M 94 238 V 398 H 626 V 238"/>
+<path class="edge" id="e-engine-store" data-a="engine" d="M 360 238 V 300"/>
+</g>
+<g class="lbl">
+<text x="187" y="37" text-anchor="middle">開始 / callback</text>
+<text x="352" y="131" text-anchor="end">認可要求 / 再開</text>
+<text x="493" y="37" text-anchor="middle">ログイン・同意</text>
+<text x="518" y="119" text-anchor="middle">Interaction API（バックチャネル）</text>
+<text x="227" y="199" text-anchor="middle">トークン</text>
+<text x="493" y="199" text-anchor="middle">検査 / 公開鍵</text>
+<text x="368" y="274">Store Port</text>
+<text x="360" y="390" text-anchor="middle">業務 API（auth-engine を通らない）</text>
+</g>
+<g class="node n-browser" id="n-browser"><rect x="280" y="14" width="160" height="62" rx="10"/><text class="nm" x="360" y="40">ブラウザ</text><text class="sub" x="360" y="60">あなたの操作</text></g>
+<g class="node n-interaction" id="n-interaction"><rect x="546" y="14" width="160" height="62" rx="10"/><text class="nm" x="626" y="40">Interaction App</text><text class="sub" x="626" y="60">ログインと同意 · {{index .Ports "interaction"}}</text></g>
+<g class="node n-client" id="n-client"><rect x="14" y="176" width="160" height="62" rx="10"/><text class="nm" x="94" y="202">Client</text><text class="sub" x="94" y="222">Notes Web · {{index .Ports "client"}}</text></g>
+<g class="node n-engine" id="n-engine"><rect x="280" y="176" width="160" height="62" rx="10"/><text class="nm" x="360" y="202">auth-engine</text><text class="sub" x="360" y="222">認可サーバー · {{index .Ports "engine"}}</text></g>
+<g class="node n-resource" id="n-resource"><rect x="546" y="176" width="160" height="62" rx="10"/><text class="nm" x="626" y="202">Resource Server</text><text class="sub" x="626" y="222">Notes API · {{index .Ports "resource"}}</text></g>
+<g class="node n-store" id="n-store"><rect x="280" y="300" width="160" height="56" rx="10"/><text class="nm" x="360" y="324">Store</text><text class="sub" x="360" y="343">メモリ（storage/memory）</text></g>
+<g class="here here-client"><rect x="22" y="167" width="60" height="18" rx="9"/><text x="52" y="180">いまここ</text></g>
+<g class="here here-interaction"><rect x="554" y="5" width="60" height="18" rx="9"/><text x="584" y="18">いまここ</text></g>
+<circle class="dot" id="dot" r="7" cx="-20" cy="-20"/>
+</svg>
+{{end}}
+
+{{define "hub"}}{{template "head" "Notes Web"}}
+<header>
+<div class="eyebrow">AUTH-ENGINE / 境界ツアー</div>
+<h1>1 回のログインと API 呼び出しで、何が境界を越えるかを見る</h1>
+<p class="lead">この画面は Client「Notes Web」です。下のボタンを押すと、ブラウザ・auth-engine・Interaction App・Resource Server の間で起きたやり取りが、順番に図とタイムラインに出ます。どれも別のポートで動く別のアプリケーションです。</p>
+</header>
+
+<div class="cols">
+<div class="sticky">
+<section class="card" aria-labelledby="map-title">
+<h2 id="map-title">境界図</h2>
+{{template "diagram" .}}
+<div class="caption" id="caption" aria-live="polite"><strong>まだやり取りがありません</strong><span>右のボタンを押すと、ここに 1 つずつ説明が出ます。</span></div>
+<div class="player">
+<button type="button" class="plain" id="prev" disabled>◀ 前</button>
+<button type="button" class="quiet" id="play" disabled>▶ 順に再生</button>
+<button type="button" class="plain" id="next" disabled>次 ▶</button>
+<span class="pos" id="pos"></span>
+</div>
+</section>
+</div>
+
+<div>
+<section class="card" aria-labelledby="app-title">
+<h2 id="app-title">Notes Web <small class="badge">Client {{index .Ports "client"}}</small></h2>
+{{if .Linked}}
+<div class="state"><span class="badge ok">連携済み</span>
+{{range .Scopes}}<span class="badge">{{.}}</span>{{end}}
+<span>Access Token の期限 {{.Expires}}{{if .Expired}}（切れている）{{end}} · 検証方式 {{.Verify}}</span></div>
+<div class="actions">
+<form class="action" method="post" action="/actions/read"><button>ノートを読む</button><small><code>GET /notes</code> · scope <code>notes:read</code> が要る</small></form>
+<form class="action" method="post" action="/actions/write"><button>ノートを書く</button><div class="write"><input type="text" name="text" placeholder="書く内容（空でもよい）" aria-label="書く内容" maxlength="200"></div>
+<span></span><small><code>POST /notes</code> · scope <code>notes:write</code> が要る{{if not .CanWrite}}。同意画面で外したので <strong>403</strong> になる{{end}}</small></form>
+<form class="action" method="post" action="/actions/anonymous"><button class="quiet">トークンなしで呼ぶ</button><small>Resource Server が 401 と、認可サーバーの場所を返す</small></form>
+<form class="action" method="post" action="/actions/refresh"><button class="quiet">トークンを更新</button><small>Refresh Token を Rotation して、新しい Access Token を得る</small></form>
+<form class="action" method="post" action="/actions/revoke"><button class="quiet">Access Token を失効</button><small>失効が Resource Server にいつ伝わるかは、検証方式で変わる</small></form>
+<form class="action" method="post" action="/start"><button class="plain">もう一度ログイン</button><small>同意画面で scope を選び直す</small></form>
+</div>
+{{else}}
+<div class="state"><span class="badge">未連携</span><span>Notes API を呼ぶための Access Token を、まだ持っていません。</span></div>
+<div class="actions">
+<form class="action" method="post" action="/start"><button>ログインして連携する</button><small>auth-engine の <code>/authorize</code> へ移動し、Interaction App のログイン画面を経て、ここへ戻る</small></form>
+<form class="action" method="post" action="/actions/anonymous"><button class="quiet">トークンなしで呼ぶ</button><small>先に Resource Server だけを呼んでみる。401 と、認可サーバーの場所が返る</small></form>
+</div>
+{{end}}
+
+{{with .Last}}
+<div class="result" id="result">
+<header><h3>{{.Title}}</h3>{{if .Status}}<span class="badge {{if .OK}}ok{{else}}ng{{end}}">{{.Status}}</span>{{else if not .OK}}<span class="badge ng">失敗</span>{{end}}</header>
+{{if .Header}}<pre>WWW-Authenticate: {{.Header}}</pre>{{end}}
+{{if .Body}}<pre>{{.Body}}</pre>{{end}}
+{{if .Hint}}<p class="hint">{{.Hint}}</p>{{end}}
+</div>
+{{end}}
+
+{{if .TokenClaims}}
+<details class="peek"><summary>Access Token の中身を覗く（JWT の payload）</summary>
+<pre>{{.TokenClaims}}</pre>
+<p class="kv">ツアー用の覗き窓です。<code>aud</code> が Notes API（{{.ResourceURL}}）に絞られています。Client は本来 Access Token を不透明な文字列として扱い、検証するのは Resource Server です。</p>
+</details>
+{{else if .Linked}}
+<p class="kv">Access Token は Opaque（ランダムな文字列）です。中身はなく、Resource Server は Introspection で状態を確かめます。</p>
+{{end}}
+</section>
+
+<section class="card" aria-labelledby="tl-title">
+<h2 id="tl-title">タイムライン</h2>
+<p>行を押すと、図の該当する線が光り、境界を越えた値が開きます。新しい操作が上です。</p>
+{{range $i, $s := .Steps}}
+<details class="step" data-step="{{$s.Started.UnixNano}}"{{if eq $i 0}} open{{end}}>
+<summary>操作 {{$s.N}} · {{$s.Title}}<small>{{len $s.Events}} 件</small></summary>
+<ol>
+{{range $s.Events}}
+<li>
+<button type="button" class="ev" data-seq="{{.Seq}}" data-from="{{.From}}" data-to="{{.To}}" aria-expanded="false">
+<span class="idx">{{.Index}}</span>
+<span class="hop"><span class="chip c-{{.From}}">{{name .From}}</span><span aria-hidden="true">→</span><span class="chip c-{{.To}}">{{name .To}}</span>
+<code class="what">{{if .Method}}{{.Method}} {{end}}{{.Target}}</code></span>
+{{if .Status}}<span class="badge {{statusClass .Status}}">{{.Status}}</span>{{else if .Failed}}<span class="badge ng">error</span>{{else}}<span></span>{{end}}
+<span class="note">{{.Note}}</span>
+</button>
+<div class="detail" hidden>
+{{if .Ref}}<h4>対応する仕様</h4><div>{{.Ref}}</div>{{end}}
+{{if .Request}}<h4>{{name .From}} が送ったもの</h4><table>{{range .Request}}<tr><th>{{.K}}</th><td><code>{{.V}}</code></td></tr>{{end}}</table>{{end}}
+{{if .Response}}<h4>{{name .To}} が返したもの</h4><table>{{range .Response}}<tr><th>{{.K}}</th><td>{{if multiline .V}}<pre>{{.V}}</pre>{{else}}<code>{{.V}}</code>{{end}}</td></tr>{{end}}</table>{{end}}
+{{if and (not .Request) (not .Response) (not .Ref)}}<div>記録した値はありません。</div>{{end}}
+</div>
+</li>
+{{end}}
+</ol>
+</details>
+{{else}}
+<p class="empty">まだ何も起きていません。</p>
+{{end}}
+<form method="post" action="/reset" style="margin-top:12px"><button class="plain">最初からやり直す（記録とセッションを消す）</button></form>
+</section>
+</div>
+</div>
+
+<script>
+(function () {
+  var svg = document.getElementById('diagram');
+  var dot = document.getElementById('dot');
+  var caption = document.getElementById('caption');
+  var prev = document.getElementById('prev'), next = document.getElementById('next'), play = document.getElementById('play'), pos = document.getElementById('pos');
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var rows = [];      // いま再生の対象にしている操作の行
+  var current = -1;   // rows の中の位置
+  var timer = null;
+  var flight = 0;     // 進行中のアニメーションを打ち切るための番号
+
+  function clear() {
+    svg.querySelectorAll('.on,.src,.dst').forEach(function (el) { el.classList.remove('on', 'src', 'dst'); });
+  }
+
+  // fly は線に沿って点を from から to へ動かす。線は data-a のノードから描いてある
+  function fly(path, reverse) {
+    var len = path.getTotalLength(), mine = ++flight, start = null;
+    function place(k) {
+      var p = path.getPointAtLength(reverse ? len * (1 - k) : len * k);
+      dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+    }
+    if (still) { place(1); return; }
+    requestAnimationFrame(function tick(now) {
+      if (mine !== flight) return;
+      if (start === null) start = now;
+      var k = Math.min(1, (now - start) / 650);
+      place(k);
+      if (k < 1) requestAnimationFrame(tick);
+    });
+  }
+
+  function show(row) {
+    var from = row.dataset.from, to = row.dataset.to;
+    clear();
+    var edge = document.getElementById('e-' + [from, to].sort().join('-'));
+    var a = document.getElementById('n-' + from), b = document.getElementById('n-' + to);
+    if (a) a.classList.add('src');
+    if (b) b.classList.add('dst');
+    if (edge) { edge.classList.add('on'); fly(edge, edge.dataset.a !== from); }
+    var chips = row.querySelectorAll('.chip');
+    caption.textContent = '';
+    var head = document.createElement('strong');
+    head.textContent = row.querySelector('.idx').textContent + '. ' + chips[0].textContent + ' → ' + chips[1].textContent + '　' + row.querySelector('.what').textContent;
+    var body = document.createElement('span');
+    body.textContent = row.querySelector('.note').textContent;
+    caption.append(head, body);
+  }
+
+  function select(row, open) {
+    var list = Array.prototype.slice.call(row.closest('.step').querySelectorAll('.ev'));
+    document.querySelectorAll('.ev[aria-current=true]').forEach(function (el) {
+      el.removeAttribute('aria-current');
+      if (el !== row) { el.setAttribute('aria-expanded', 'false'); el.nextElementSibling.hidden = true; }
+    });
+    rows = list; current = list.indexOf(row);
+    row.setAttribute('aria-current', 'true');
+    if (open !== undefined) { row.setAttribute('aria-expanded', String(open)); row.nextElementSibling.hidden = !open; }
+    row.closest('.step').open = true;
+    show(row);
+    prev.disabled = current <= 0; next.disabled = current >= rows.length - 1; play.disabled = rows.length === 0;
+    pos.textContent = (current + 1) + ' / ' + rows.length;
+  }
+
+  function stop() { if (timer) { clearInterval(timer); timer = null; } play.textContent = '▶ 順に再生'; }
+
+  function start() {
+    if (!rows.length) return;
+    select(rows[0], false);
+    play.textContent = '■ 止める';
+    timer = setInterval(function () {
+      select(rows[current + 1], false);
+      if (current >= rows.length - 1) stop();
+    }, 1300);
+    if (rows.length === 1) stop();
+  }
+
+  document.querySelectorAll('.ev').forEach(function (row) {
+    row.addEventListener('click', function () {
+      stop();
+      var open = !(row.getAttribute('aria-current') === 'true' && row.getAttribute('aria-expanded') === 'true');
+      select(row, open);
+    });
+  });
+  prev.addEventListener('click', function () { stop(); if (current > 0) select(rows[current - 1], false); });
+  next.addEventListener('click', function () { stop(); if (current < rows.length - 1) select(rows[current + 1], false); });
+  play.addEventListener('click', function () { if (timer) stop(); else start(); });
+
+  // 最新の操作を対象にする。まだ再生していない操作なら、読み込んだときに 1 回だけ順に再生する。
+  // 目印は操作の開始時刻（番号は「最初からやり直す」で 1 に戻る）
+  var latest = document.querySelector('.step');
+  if (latest) {
+    var first = latest.querySelector('.ev');
+    if (first) {
+      select(first, false);
+      var seen = null;
+      try { seen = sessionStorage.getItem('tour-played'); } catch (e) {}
+      if (seen !== latest.dataset.step) {
+        try { sessionStorage.setItem('tour-played', latest.dataset.step); } catch (e) {}
+        start();
+      }
+    }
+  }
+})();
+</script>
+{{template "foot"}}{{end}}
+
+{{define "login"}}{{template "head" "ログインと同意"}}
+<header>
+<div class="eyebrow">AUTH-ENGINE / 境界ツアー</div>
+<h1>ログインと同意</h1>
+<div class="where"><strong>いまここは Interaction App（{{index .Ports "interaction"}}）</strong><span>auth-engine（{{index .Ports "engine"}}）の外にある別のアプリケーションです。auth-engine はログイン画面を持たず、ブラウザをここへ送ってきました。</span></div>
+</header>
+
+<div class="cols">
+<section class="card consent" aria-labelledby="consent-title">
+<h2 id="consent-title">{{.Txn.Client.Name}} があなたのノートへのアクセスを求めています</h2>
+<p class="kv">client_id <code>{{.Txn.Client.ClientID}}</code>（{{.Txn.Client.Profile}}）{{if .RedirectHost}} · 承認すると <strong>{{.RedirectHost}}</strong> に戻ります{{end}}</p>
+<form method="post" action="/login">
+<input type="hidden" name="txn" value="{{.Txn.ID}}">
+<label>ユーザー名<br><input type="text" name="username" value="{{if .Txn.Request.LoginHint}}{{.Txn.Request.LoginHint}}{{else}}alice{{end}}" required autofocus autocomplete="username"></label>
+<p class="kv">デモなのでパスワードは確かめません。本物の Interaction App は、ここで本人確認（パスワード、パスキー、MFA）を行います。</p>
+<h3 style="margin-top:16px">許可する操作</h3>
+{{range .Scopes}}
+<label class="scope"><input type="checkbox" name="scope" value="{{.Name}}" checked><span><strong>{{.Label}}</strong> <code>{{.Name}}</code></span>{{if .Detail}}<small>{{.Detail}}</small>{{end}}</label>
+{{end}}
+{{if .Txn.Request.Resource}}<p class="kv">発行される Access Token は {{range .Txn.Request.Resource}}<code>{{.}}</code> {{end}}だけに使えます。</p>{{end}}
+<p class="kv">「ノートを書く」を外して承認すると、あとで書き込みが 403 になる様子を見られます。</p>
+<div class="buttons"><button name="action" value="approve">承認する</button><button class="plain" name="action" value="deny">拒否する</button></div>
+</form>
+</section>
+
+<div>
+<section class="card" aria-labelledby="map-title">
+<h2 id="map-title">この画面の位置</h2>
+{{template "diagram" .}}
+<p class="kv">この画面を出す前に、Interaction App はバックチャネル（破線）で auth-engine に要求の内容を問い合わせました。承認すると、同じ経路で結果（ユーザー名と許可した scope）を伝え、返ってきた <code>resume_url</code> へブラウザを戻します。認可コードやトークンは、ここには渡りません。</p>
+<details class="peek"><summary>auth-engine から受け取った要求（<code>GET /transactions/{id}</code> の応答のうち、この画面が使う部分）</summary><pre>{{.TxnJSON}}</pre></details>
+</section>
+</div>
+</div>
+{{template "foot"}}{{end}}
+
+{{define "message"}}{{template "head" .Title}}
+<header><div class="eyebrow">AUTH-ENGINE / 境界ツアー</div><h1>{{.Title}}</h1></header>
+<section class="card" style="margin-top:18px"><p style="color:var(--ink)">{{.Text}}</p>
+<p style="margin-top:12px"><a class="button" href="{{.BackURL}}">Client（Notes Web）へ戻る</a></p></section>
+{{template "foot"}}{{end}}

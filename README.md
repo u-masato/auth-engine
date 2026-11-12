@@ -22,7 +22,11 @@ M3 まで完了（2026-10-25）。API は安定していない。
 ## 試す
 
 ```bash
-# エンジン + Interaction API + デモのログイン画面を 1 プロセスで起動
+# 境界ツアー: Client・auth-engine・Interaction App・Resource Server を 1 プロセスで起動し、
+# ログインから業務 API の呼び出しまでのやり取りを図で見る（http://localhost:8100 を開く）
+cd examples/standalone && go run ./cmd/tour
+
+# エンジン + Interaction API + デモのログイン画面 + 開発者コンソールを 1 プロセスで起動
 cd examples/standalone && go run ./cmd/server -db ./auth.db
 
 # 別の端末で、Native クライアントとしてフローを実行（URL をブラウザで開く）
@@ -47,7 +51,7 @@ go test -run Example -v ./...                      # Example を実行する
 | `github.com/u-masato/auth-engine` | コア。`client` / `authorization` / `grant` / `token` / `oidc` / `keys` / `httpapi` / `storage` / `resource` / `cimd` と、配線の入口 `Engine`。Resource Server 側に組み込む `resourceserver` も同じモジュール | go-jose/v4 のみ |
 | `.../adapters/sqlite` | SQLite Store Adapter | modernc.org/sqlite, goose |
 | `.../adapters/postgres` | PostgreSQL Store Adapter | pgx/v5, goose（テストに Testcontainers） |
-| `.../examples/standalone` | デモサーバー、デモ Interaction App、サンプルクライアント、開発者コンソール、デモ MCP サーバー、CIMD 文書の配信 | — |
+| `.../examples/standalone` | デモサーバー、デモ Interaction App、サンプルクライアント、開発者コンソール、デモ MCP サーバー、CIMD 文書の配信、境界ツアー（全コンポーネントのやり取りを図で見るデモ） | — |
 | `.../tests` | E2E テスト（SQLite + HTTP + Interaction App） | go-jose/v4（RP 側の ID Token 検証） |
 
 Interaction App（ログイン・同意画面）を実装するには [docs/interaction-api.md](docs/interaction-api.md) を読む。

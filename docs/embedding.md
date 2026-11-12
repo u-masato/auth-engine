@@ -3,6 +3,7 @@
 - 対象バージョン: M3 タスク 3 時点の main（2026-10-25）
 - 前提: Go 1.26 以上。OAuth 2.0 の Authorization Code + PKCE の流れを知っていること
 - 動く全体像: [examples/standalone/cmd/server/main.go](../examples/standalone/cmd/server/main.go)（エンジン + Interaction API + デモのログイン画面を 1 プロセスで起動する）
+- コンポーネントの間を何が通るかを先に見る: [examples/standalone/cmd/tour](../examples/standalone/cmd/tour/main.go)（Client・Interaction App・Resource Server を含む全体を起動し、やり取りを図とタイムラインで見せる）
 
 この文書は、エンジンを自分のサービスに組み込む手順と、本番に出す前に決めることをまとめる。
 コードは Example テストとして置いてあり、`go test` で実際に動かしている。pkg.go.dev でも読める。この文書からはそこへリンクする。
@@ -187,7 +188,7 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
   - JWT を選ぶ resource には、`AccessTokenTTL` の短い Client を組み合わせる。失効させても、ローカル検証では `exp` まで有効に見えるためである。
   - `Engine.New` は、JWT を選んだ resource の署名アルゴリズムに対応する鍵が `Keys` にあることを起動時に確かめる。ES256 を選ぶなら ES256 の署名鍵も用意する。
   - Resource Server は JWKS をキャッシュするので、鍵をローテーションするときは §6 の手順で旧鍵を残しておく。
-- **MCP サーバーなど、本リポジトリの Resource Server を Go で書くなら `resourceserver` パッケージを使う**（[ADR-0008](adr/0008-mcp-integration.md) §7）。例は [`resourceserver.ExampleNew`](../resourceserver/example_test.go) と、起動できる形の [`examples/standalone/cmd/mcp-server`](../examples/standalone/cmd/mcp-server/main.go)。
+- **MCP サーバーなど、本リポジトリの Resource Server を Go で書くなら `resourceserver` パッケージを使う**（[ADR-0008](adr/0008-mcp-integration.md) §7）。例は [`resourceserver.ExampleNew`](../resourceserver/example_test.go) と、起動できる形の [`examples/standalone/cmd/mcp-server`](../examples/standalone/cmd/mcp-server/main.go)。MCP ではない業務 API に組み込む例は、境界ツアーの [`examples/standalone/tour/notes.go`](../examples/standalone/tour/notes.go)（ルートごとに scope を決め、トークンの `sub` で返すデータを絞る）。
   - `resourceserver.New` に自分の `Resource`（認可サーバーの `Config.Resources` と同じ URI）、`AuthorizationServers`（認可サーバーの Issuer）、`Verifier` を渡す。`MetadataHandler` を `MetadataPath()`（RFC 9728 の `/.well-known/oauth-protected-resource[/{path}]`）に mount し、保護したいルートを `Protect(handler, 必要な scope...)` で包む。
   - `Verifier` は `IntrospectionVerifier`（Opaque / JWT 両方。Machine Profile の資格情報で `/introspect` を呼ぶ。失効が即時に伝わる）か `JWTVerifier`（JWT のみ。認可サーバーのメタデータから `jwks_uri` を得てローカル検証。失効は `exp` まで伝わらない）。どちらでも、ミドルウェアはトークンの `aud` に自分の resource が含まれることを必ず確認する。これを無効にする設定はない。
   - 未提示・無効なトークンは 401、scope 不足は 403 で、`WWW-Authenticate` に `resource_metadata` と必要な scope を載せる（MCP クライアントはこれを見て認可サーバーを見つけ、足りない scope を要求し直す）。検証方式の障害（認可サーバーに到達できない）は 503。
