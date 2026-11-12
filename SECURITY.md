@@ -32,7 +32,7 @@ GitHub の **Private vulnerability reporting** を使います。
 | --- | --- |
 | コアモジュール（`github.com/u-masato/auth-engine` の全パッケージ） | 対象 |
 | `adapters/sqlite`、`adapters/postgres` | 対象 |
-| `examples/standalone`（デモサーバー、デモのログイン画面、開発者コンソール） | 対象外。本番用ではない。ただし、デモの設定や文書が本番で危険な使い方へ誘導している場合は報告を歓迎する |
+| `examples/standalone`（デモサーバー、デモのログイン画面、開発者コンソール、管理 API の例） | 対象外。本番用ではない。ただし、デモの設定や文書が本番で危険な使い方へ誘導している場合は報告を歓迎する |
 | `tests`、`conformance` | 対象外 |
 
 ## サポートするバージョン
@@ -48,11 +48,12 @@ GitHub の **Private vulnerability reporting** を使います。
 
 次は [README の「意図した制約」](README.md#意図した制約) に書いた設計上の判断で、脆弱性ではありません。変えたい場合は issue で設計の議論として提案してください。
 
-- PKCE（S256）を使わない Authorization Code Grant、Implicit Grant、Password Grant、Dynamic Client Registration を受け付けないこと
+- PKCE（S256）を使わない Authorization Code Grant を受け付けないこと（例外は [ADR-0009](docs/adr/0009-web-legacy-profile.md) の Web Legacy Profile だけで、まだ実装していない）
+- Implicit Grant、Password Grant、Dynamic Client Registration を提供しないこと
 - JWT Access Token の失効が `exp` まで Resource Server に伝わらないこと（Opaque を既定にし、JWT は resource ごとに選ぶ設計。[ADR-0008](docs/adr/0008-mcp-integration.md) §3）
 - レート制限を持たないこと。前段のリバースプロキシで行う前提（[組み込みガイド](docs/embedding.md) §9）
 - 組み込みガイドの「本番に出す前の確認」に反する設定（`AllowInsecureIssuer`、`InsecureCookies`、`storage/memory` など）で起きる問題
 
 ## 組み込む人へ
 
-本番に出す前に [組み込みガイド](docs/embedding.md) の §9「本番に出す前の確認」を通してください。Interaction App を実装する場合は、[Interaction API 仕様](docs/interaction-api.md) の「守ってほしいこと」も満たしてください。
+本番に出す前に [組み込みガイド](docs/embedding.md) の §9「本番に出す前の確認」を通してください。鍵ローテーション、バックアップと復旧、障害時の対応は [セルフホスト運用ガイド](docs/operations.md) にあります。Interaction App を実装する場合は、[Interaction API 仕様](docs/interaction-api.md) の「守ってほしいこと」も満たしてください。

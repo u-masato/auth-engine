@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        設計の判断は ADR（[docs/adr/](https://github.com/u-masato/auth-engine/tree/main/docs/adr)）に残しています。PKCE なしの Code Grant、Implicit、Password Grant、Dynamic Client Registration、Custom Profile、コアへの外部依存の追加は、意図して提供していません（[CONTRIBUTING.md](https://github.com/u-masato/auth-engine/blob/main/CONTRIBUTING.md)）。
+        設計の判断は ADR（[docs/adr/](https://github.com/u-masato/auth-engine/tree/main/docs/adr)）に残しています。PKCE なしの Code Grant（ADR-0009 の Web Legacy Profile を除く）、Implicit、Password Grant、Dynamic Client Registration、Custom Profile、コアへの外部依存の追加は、意図して提供していません（[CONTRIBUTING.md](https://github.com/u-masato/auth-engine/blob/main/CONTRIBUTING.md)）。
   - type: textarea
     id: problem
     attributes:

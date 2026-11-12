@@ -16,7 +16,8 @@ auth-engine に関心を持ってくれてありがとうございます。こ�
 
 次は設計上の判断です（[ADR-0001](docs/adr/0001-scope-and-principles.md)、[README の「意図した制約」](README.md#意図した制約)）。変えたい場合は、実装より先に issue で設計の議論を始めてください。
 
-- PKCE なしの Authorization Code Grant、`plain`、Implicit Grant、Password Grant、Dynamic Client Registration
+- PKCE なしの Authorization Code Grant（例外は [ADR-0009](docs/adr/0009-web-legacy-profile.md) の Web Legacy Profile だけで、まだ実装していない）
+- `plain`、Implicit Grant、Password Grant、Dynamic Client Registration
 - Client Profile を迂回する個別設定や Custom Profile
 - コアモジュールへの go-jose/v4 以外の外部依存（DB ドライバー、Web フレームワーク、OpenTelemetry など）
 - 管理 GUI、マルチテナント
