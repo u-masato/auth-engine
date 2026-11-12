@@ -215,6 +215,10 @@ M3 はコアの状態遷移を変えずに済む（ADR-0001 §2 (5)）が、次�
   - `-clients` のファイルの書式を `adminapi.ClientSpec`（管理 API の本文と同じ）にそろえた。シークレットの項目名は `secret` から `client_secret` に変わり、`logo_uri` `policy_uri` `access_token_ttl`（秒）が指定できる。未知の項目があると起動を止める（旧書式の `secret` を黙って無視し、別のシークレットを生成することがないように）。
   - 見送ったもの: シークレットの新旧併用（無停止の交換は M4a の `private_key_jwt` で扱う）、運用者ごとの認証と「誰が」の監査（`adminapi.Authenticator` を差し替える前提の例にとどめた）、SQLite の `grants(subject)` の索引（今回の一覧は一意制約の索引を使うので関係しない）。
 - **同日の構成の整理（挙動は変わらない）**: `authorization` を [ADR-0007](adr/0007-package-layout.md) §2 のファイル構成（`begin.go` `complete.go` `resume.go` `code.go`）に分け、`token` の authorization_code を `authorizationcode.go` に、`httpapi` の `revocation.go` を `revoke.go` と `introspect.go` に、クライアント資格情報の取り出しを `clientauth.go` に分けた。main の CI を止めていた `FuzzParseScopes`（#38 で消えた `parseScopes` を参照していた）は `client.FuzzParseScope` に移した。
+- **`Purge` の範囲の拡大（2026-11-11）**: `Store.Purge` が、トークンのなくなった Token Family と、Token Family のなくなった失効済みの Grant も消すようにした（[ADR-0005](adr/0005-storage-port.md) §7）。Family は Code 交換と `client_credentials` 要求のたびに 1 行増え、これまでは消す規則がなかった。2026-10-24 の決定（Grant と Family は削除しない）からの変更で、外から見える差分は次の 3 点。
+  - 自作の Adapter は `Purge` の実装を広げ、契約テスト `PurgeChildlessParents` `PurgeVersusRotate` `PurgeVersusUpsertGrant` を通す必要がある。
+  - `DELETE /grants` は、失効済みの Grant が Purge された後は `204` ではなく `404` を返す（[interaction-api.md](interaction-api.md)）。失効と再同意の間に Purge が入ると、Grant の ID と `CreatedAt` が新しくなる。
+  - `token.Service` の Introspection・Revocation・Refresh は、Refresh Token を引いた直後に Purge で Family ごと消えた場合を、内部エラーではなく不明なトークンとして扱う。Refresh Token が残っているのに Family や Grant がない不整合は、2026-11-10 の扱いのまま内部エラー。PostgreSQL Adapter の `RotateRefreshToken` も、同じ場合を `ErrNotFound` にする。
 
 ## M4a のタスク順序（案）
 

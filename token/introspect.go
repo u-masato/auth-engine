@@ -22,6 +22,24 @@ const (
 // 取り違えて、黙って成功や active: false にしないため。
 var errNoSuchToken = errors.New("token: no such token")
 
+// parentLookupErr は、Refresh Token を引いた後に親（Token Family / Grant）の操作が err を返した
+// ときの扱いを決める。Inspect、Revoke、Refresh が共通に使う。
+//
+// Store.Purge は子のなくなった親を、子と同じ 1 回の操作で消す（ADR-0005 §7）。親が
+// storage.ErrNotFound なら Refresh Token を引き直して、次のどちらかを区別する。
+//
+//   - Refresh Token も消えている: 引いた直後に Purge された。errNoSuchToken を返す。
+//   - Refresh Token が残っている: 不整合。err をそのまま返す（HTTP 層で 500）。
+func (s *Service) parentLookupErr(ctx context.Context, refreshHash string, err error) error {
+	if !errors.Is(err, storage.ErrNotFound) {
+		return err
+	}
+	if _, again := s.Store.LookupRefreshToken(ctx, refreshHash); errors.Is(again, storage.ErrNotFound) {
+		return errNoSuchToken
+	}
+	return err
+}
+
 // lookupOrder は token_type_hint から探索順を返す。hint が外れていても両方の種別を探す
 // （RFC 7009 §2.1、RFC 7662 §2.1）。
 func lookupOrder(hint string) []string {
@@ -101,7 +119,8 @@ func (s *Service) inspectAccess(ctx context.Context, hash string, now time.Time)
 // inspectRefresh は Refresh Token の状態を返す。見つからなければ errNoSuchToken。
 //
 // 有効な Refresh Token が参照する Family や Grant がないのは不整合なので、「この種別ではない」と
-// 取り違えて active: false にせず、内部エラーにする（revokeRefresh と同じ扱い）。
+// 取り違えて active: false にせず、内部エラーにする（revokeRefresh と同じ扱い）。引いた直後に
+// Purge で Refresh Token ごと消えた場合だけ errNoSuchToken になる（parentLookupErr）。
 func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time) (*Introspection, error) {
 	rt, err := s.Store.LookupRefreshToken(ctx, hash)
 	if errors.Is(err, storage.ErrNotFound) {
@@ -116,14 +135,14 @@ func (s *Service) inspectRefresh(ctx context.Context, hash string, now time.Time
 	}
 	family, err := s.Store.GetTokenFamily(ctx, rt.FamilyID)
 	if err != nil {
-		return nil, fmt.Errorf("token: get token family: %w", err)
+		return nil, fmt.Errorf("token: get token family: %w", s.parentLookupErr(ctx, hash, err))
 	}
 	if !family.Active() {
 		return inactive, nil
 	}
 	g, err := s.Grants.GetGrant(ctx, family.GrantID)
 	if err != nil {
-		return nil, fmt.Errorf("token: get grant: %w", err)
+		return nil, fmt.Errorf("token: get grant: %w", s.parentLookupErr(ctx, hash, err))
 	}
 	if !g.Active() {
 		return inactive, nil

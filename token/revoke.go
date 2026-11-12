@@ -98,6 +98,7 @@ func (s *Service) revokeAccess(ctx context.Context, hash, owner string, now time
 // revokeRefresh は Refresh Token の Family ごと失効させる（RFC 7009 §2.1）。見つからなければ errNoSuchToken。
 //
 // Refresh Token が参照する Family がないのは不整合なので、黙って成功にせず内部エラーにする。
+// 引いた直後に Purge で Refresh Token ごと消えた場合だけ errNoSuchToken になる（parentLookupErr）。
 func (s *Service) revokeRefresh(ctx context.Context, hash, owner string, now time.Time) (bool, error) {
 	rt, err := s.Store.LookupRefreshToken(ctx, hash)
 	if errors.Is(err, storage.ErrNotFound) {
@@ -109,14 +110,14 @@ func (s *Service) revokeRefresh(ctx context.Context, hash, owner string, now tim
 	if owner != "" {
 		family, err := s.Store.GetTokenFamily(ctx, rt.FamilyID)
 		if err != nil {
-			return false, fmt.Errorf("token: get token family: %w", err)
+			return false, fmt.Errorf("token: get token family: %w", s.parentLookupErr(ctx, hash, err))
 		}
 		if family.ClientID != owner {
 			return false, nil
 		}
 	}
 	if err := s.Store.RevokeTokenFamily(ctx, rt.FamilyID, now); err != nil {
-		return false, fmt.Errorf("token: revoke token family: %w", err)
+		return false, fmt.Errorf("token: revoke token family: %w", s.parentLookupErr(ctx, hash, err))
 	}
 	return true, nil
 }

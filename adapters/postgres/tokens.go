@@ -187,11 +187,21 @@ func (s *Store) RotateRefreshToken(ctx context.Context, oldHash string, next *to
 		if err != nil {
 			return err
 		}
+		// 上の読み取りの後に Purge が旧トークンごと Family（と失効済みの Grant）を消していると、行がない。
+		// Purge は子と親を同時に消すので（ADR-0005 §7）、旧トークンが消えた場合と同じ ErrNotFound にする。
 		var grantStatus, familyStatus string
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM grants WHERE id = $1 FOR UPDATE`, grantID).Scan(&grantStatus); err != nil {
+		err = tx.QueryRowContext(ctx, `SELECT status FROM grants WHERE id = $1 FOR UPDATE`, grantID).Scan(&grantStatus)
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.ErrNotFound
+		}
+		if err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM token_families WHERE id = $1 FOR UPDATE`, familyID).Scan(&familyStatus); err != nil {
+		err = tx.QueryRowContext(ctx, `SELECT status FROM token_families WHERE id = $1 FOR UPDATE`, familyID).Scan(&familyStatus)
+		if errors.Is(err, sql.ErrNoRows) {
+			return storage.ErrNotFound
+		}
+		if err != nil {
 			return err
 		}
 		old, err := scanRefresh(tx.QueryRowContext(ctx, `SELECT `+refreshColumns+` FROM refresh_tokens WHERE hash = $1 FOR UPDATE`, oldHash))
@@ -302,7 +312,18 @@ func (s *Store) RevokeAccessToken(ctx context.Context, hash string, now time.Tim
 	return nil
 }
 
-// Purge は期限切れの行を削除する。消費済み Code も期限が過ぎれば削除する。
+// Purge は期限切れの行と、子のなくなった親の行を削除する（ADR-0005 §7）。消費済み Code も
+// 期限が過ぎれば削除する。
+//
+// 親（Token Family、失効済みの Grant）の削除は FOR UPDATE SKIP LOCKED で候補をロックする。
+// Rotation と失効は Grant → Family → トークンの順に行をロックするので、トークンを消してから親に
+// 進む Purge が行ロックを待つと、順序が逆になってデッドロックしうる。他の操作がロックしている行は
+// 待たずに飛ばし、次回の Purge に回す。
+//
+// 候補を選んだ後で子が増えることはない。Family に子を足すのは RotateRefreshToken だけで、
+// Family をロックしてから行う（ロック中なら飛ばす）。Grant に Family を足す IssueTokens は Grant が
+// active であることを要求し、失効済みの Grant を active に戻す UpsertGrant は行を更新するので、
+// ロックの取得時に status の条件が再評価される。
 func (s *Store) Purge(ctx context.Context, now time.Time) error {
 	n := now.UnixNano()
 	return s.write(ctx, func(tx *sql.Tx) error {
@@ -316,6 +337,20 @@ func (s *Store) Purge(ctx context.Context, now time.Time) error {
 				return err
 			}
 		}
-		return nil
+		// トークンのない Family（active / revoked を問わない）。
+		if _, err := tx.ExecContext(ctx, `DELETE FROM token_families WHERE id IN (
+			SELECT f.id FROM token_families f
+			WHERE NOT EXISTS (SELECT 1 FROM access_tokens a WHERE a.family_id = f.id)
+			  AND NOT EXISTS (SELECT 1 FROM refresh_tokens r WHERE r.family_id = f.id)
+			FOR UPDATE OF f SKIP LOCKED)`); err != nil {
+			return err
+		}
+		// Family のない失効済みの Grant。active な Grant は同意の記録なので残す。
+		_, err := tx.ExecContext(ctx, `DELETE FROM grants WHERE id IN (
+			SELECT g.id FROM grants g
+			WHERE g.status = $1
+			  AND NOT EXISTS (SELECT 1 FROM token_families f WHERE f.grant_id = g.id)
+			FOR UPDATE OF g SKIP LOCKED)`, string(grant.StatusRevoked))
+		return err
 	})
 }

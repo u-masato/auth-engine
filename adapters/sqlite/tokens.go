@@ -294,7 +294,11 @@ func (s *Store) RevokeAccessToken(ctx context.Context, hash string, now time.Tim
 	})
 }
 
-// Purge は期限切れの行を削除する。消費済み Code も期限が過ぎれば削除する。
+// Purge は期限切れの行と、子のなくなった親の行を削除する（ADR-0005 §7）。消費済み Code も
+// 期限が過ぎれば削除する。
+//
+// 親の削除は全件を走査する（子の有無は family_id / grant_id の索引で引く）。書き込みは直列なので、
+// 走査の間は他の書き込みが待つ。
 func (s *Store) Purge(ctx context.Context, now time.Time) error {
 	n := now.UnixNano()
 	return s.write(ctx, func(tx *sql.Tx) error {
@@ -308,6 +312,16 @@ func (s *Store) Purge(ctx context.Context, now time.Time) error {
 				return err
 			}
 		}
-		return nil
+		// トークンのない Family（active / revoked を問わない）。
+		if _, err := tx.ExecContext(ctx, `DELETE FROM token_families
+			WHERE NOT EXISTS (SELECT 1 FROM access_tokens WHERE family_id = token_families.id)
+			  AND NOT EXISTS (SELECT 1 FROM refresh_tokens WHERE family_id = token_families.id)`); err != nil {
+			return err
+		}
+		// Family のない失効済みの Grant。active な Grant は同意の記録なので残す。
+		_, err := tx.ExecContext(ctx, `DELETE FROM grants
+			WHERE status = ?
+			  AND NOT EXISTS (SELECT 1 FROM token_families WHERE grant_id = grants.id)`, string(grant.StatusRevoked))
+		return err
 	})
 }

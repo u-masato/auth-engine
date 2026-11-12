@@ -55,6 +55,9 @@ func Run(t *testing.T, open func(t *testing.T) authengine.Store) {
 		{"RevokeTokenFamily", testRevokeTokenFamily},
 		{"RevokeAccessToken", testRevokeAccessToken},
 		{"Purge", testPurge},
+		{"PurgeChildlessParents", testPurgeChildlessParents},
+		{"PurgeVersusRotate", testPurgeVersusRotate},
+		{"PurgeVersusUpsertGrant", testPurgeVersusUpsertGrant},
 		{"ValuesAreCopied", testValuesAreCopied},
 	}
 	for _, tt := range tests {
@@ -1339,6 +1342,259 @@ func testPurge(t *testing.T, s authengine.Store) {
 	}
 	if _, err := s.GetGrant(ctx, g.ID); err != nil {
 		t.Fatalf("grant must survive purge: %v", err)
+	}
+}
+
+// testPurgeChildlessParents は、子のなくなった親の削除（ADR-0005 §7）を確かめる。
+// トークンのない Token Family と、Family のない失効済みの Grant が、トークンと同じ 1 回の Purge で消える。
+func testPurgeChildlessParents(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	short, long := base.Add(time.Minute), base.Add(time.Hour)
+
+	upsert := func(id, clientID string) *grant.Grant {
+		t.Helper()
+		g, err := s.UpsertGrant(ctx, newGrant(id, clientID, "alice", "openid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	// issue は g の下に Family を作る。refreshExpires がゼロ値なら Refresh Token を発行しない
+	// （client_credentials の Family と同じ形）。
+	issue := func(g *grant.Grant, familyID string, accessExpires, refreshExpires time.Time) {
+		t.Helper()
+		at := newAccess("at-"+familyID, familyID, g.ID)
+		at.ExpiresAt = accessExpires
+		var rt *token.RefreshToken
+		if !refreshExpires.IsZero() {
+			rt = newRefresh("rt-"+familyID, familyID)
+			rt.ExpiresAt = refreshExpires
+		}
+		if err := s.IssueTokens(ctx, newFamily(familyID, g.ID), at, rt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantFamily := func(id string, exists bool) {
+		t.Helper()
+		_, err := s.GetTokenFamily(ctx, id)
+		if exists && err != nil {
+			t.Fatalf("family %s must survive: %v", id, err)
+		}
+		if !exists {
+			wantErr(t, err, storage.ErrNotFound, "purged family "+id)
+		}
+	}
+	wantGrant := func(g *grant.Grant, exists bool) {
+		t.Helper()
+		_, err := s.GetGrant(ctx, g.ID)
+		_, findErr := s.FindGrant(ctx, g.ClientID, g.Subject)
+		if exists && (err != nil || findErr != nil) {
+			t.Fatalf("grant %s must survive: %v / %v", g.ID, err, findErr)
+		}
+		if !exists {
+			wantErr(t, err, storage.ErrNotFound, "purged grant "+g.ID)
+			wantErr(t, findErr, storage.ErrNotFound, "purged grant "+g.ID+" by client and subject")
+		}
+	}
+
+	// active な Grant: Family だけが消え、Grant は Family が 0 件になっても残る
+	active := upsert("g-active", "c-active")
+	issue(active, "f-expired", short, short)     // 全トークンが期限切れ → 消える
+	issue(active, "f-m2m", short, time.Time{})   // Refresh Token なし、期限切れ → 消える
+	issue(active, "f-live-refresh", short, long) // Refresh Token が残る → 残る
+	issue(active, "f-revoked", long, long)       // 失効済みだがトークンの行が残る → 残る
+	if err := s.RevokeTokenFamily(ctx, "f-revoked", base); err != nil {
+		t.Fatal(err)
+	}
+	lonely := upsert("g-lonely", "c-lonely")
+	issue(lonely, "f-lonely", short, short)
+
+	// 失効済みの Grant: Family が残っている間は残り、なくなれば消える
+	revokedLive := upsert("g-revoked-live", "c-revoked-live")
+	issue(revokedLive, "f-revoked-live", long, long)
+	revokedDone := upsert("g-revoked-done", "c-revoked-done")
+	issue(revokedDone, "f-revoked-done", short, short)
+	for _, g := range []*grant.Grant{revokedLive, revokedDone} {
+		if err := s.RevokeGrant(ctx, g.ID, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.Purge(ctx, base.Add(30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	wantFamily("f-expired", false)
+	wantFamily("f-m2m", false)
+	wantFamily("f-live-refresh", true)
+	wantFamily("f-revoked", true)
+	wantFamily("f-lonely", false)
+	wantFamily("f-revoked-live", true)
+	wantFamily("f-revoked-done", false)
+	wantGrant(active, true)
+	wantGrant(lonely, true) // active な Grant は同意の記録。Family がなくても残る
+	wantGrant(revokedLive, true)
+	wantGrant(revokedDone, false) // トークン → Family → Grant が 1 回の Purge で消える
+	if fam, err := s.GetTokenFamily(ctx, "f-revoked"); err != nil || fam.Active() {
+		t.Fatalf("revoked family must stay revoked while its tokens remain: %+v, %v", fam, err)
+	}
+	if g, err := s.GetGrant(ctx, revokedLive.ID); err != nil || g.Active() {
+		t.Fatalf("revoked grant must stay revoked while its families remain: %+v, %v", g, err)
+	}
+	if rt, err := s.LookupRefreshToken(ctx, "rt-f-live-refresh"); err != nil || rt.Status != token.RefreshActive {
+		t.Fatalf("live refresh token must survive: %+v, %v", rt, err)
+	}
+	list, err := s.ListGrantsBySubject(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range list {
+		if g.ID == revokedDone.ID {
+			t.Fatal("purged grant must not be listed")
+		}
+	}
+
+	// 消えた Grant と同じ Client × subject の再同意は、新しい ID の Grant になる
+	again, err := s.UpsertGrant(ctx, newGrant("g-revoked-done-2", revokedDone.ClientID, revokedDone.Subject, "openid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != "g-revoked-done-2" || !again.Active() {
+		t.Fatalf("re-consent after purge must create a fresh grant: %+v", again)
+	}
+	// 消えた Grant の ID では発行できない（失効前に発行された Code が後から交換された場合）
+	stale := newAccess("at-stale", "f-stale", revokedDone.ID)
+	wantErr(t, s.IssueTokens(ctx, newFamily("f-stale", revokedDone.ID), stale, nil), storage.ErrGrantRevoked, "issue under a purged grant")
+	issue(again, "f-again", long, long)
+
+	// 残りのトークンの期限も過ぎれば、残っていた Family と失効済みの Grant も消える
+	if err := s.Purge(ctx, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"f-live-refresh", "f-revoked", "f-revoked-live", "f-again"} {
+		wantFamily(id, false)
+	}
+	wantGrant(active, true)
+	wantGrant(lonely, true)
+	wantGrant(again, true)
+	wantGrant(revokedLive, false)
+}
+
+// testPurgeVersusRotate は、期限の境目で Rotation と Purge が同時に走っても、どちらも失敗せず、
+// 後継のトークンが親（Token Family）のないまま残らないことを確かめる。
+//
+// Rotation の時刻では旧トークンは期限内、Purge の時刻では期限切れにして、両方が同じ行を取り合う
+// 状況を作る。Rotation が勝てば後継が残るので Family は消えない。Purge が勝てば旧トークンごと消え、
+// Rotation は ErrNotFound になる。
+func testPurgeVersusRotate(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	const rounds = 20
+	for i := 0; i < rounds; i++ {
+		suffix := fmt.Sprintf("-purge-rotate-%d", i)
+		g, err := s.UpsertGrant(ctx, newGrant("g"+suffix, "c"+suffix, "alice", "openid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := newFamily("f"+suffix, g.ID)
+		at, rt := newAccess("at"+suffix, f.ID, g.ID), newRefresh("rt"+suffix, f.ID)
+		at.ExpiresAt, rt.ExpiresAt = base.Add(time.Minute), base.Add(time.Minute)
+		if err := s.IssueTokens(ctx, f, at, rt); err != nil {
+			t.Fatal(err)
+		}
+		// 後継と新しい Access Token は Purge の時刻でも期限内
+		next, access := newRefresh("rt2"+suffix, f.ID), newAccess("at2"+suffix, f.ID, g.ID)
+
+		var (
+			wg                  sync.WaitGroup
+			rotateErr, purgeErr error
+			start               = make(chan struct{})
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			rotateErr = s.RotateRefreshToken(ctx, rt.Hash, next, access, base)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			purgeErr = s.Purge(ctx, base.Add(30*time.Minute))
+		}()
+		close(start)
+		wg.Wait()
+
+		if purgeErr != nil {
+			t.Fatalf("round %d: purge failed: %v", i, purgeErr)
+		}
+		if rotateErr != nil && !errors.Is(rotateErr, storage.ErrNotFound) {
+			t.Fatalf("round %d: unexpected rotate error: %v", i, rotateErr)
+		}
+		_, nextErr := s.LookupRefreshToken(ctx, next.Hash)
+		_, _, accessErr := s.LookupAccessToken(ctx, access.Hash)
+		_, familyErr := s.GetTokenFamily(ctx, f.ID)
+		if rotateErr == nil {
+			// Rotation が成立したなら、後継・Access Token・Family がそろって残る
+			if nextErr != nil || accessErr != nil || familyErr != nil {
+				t.Fatalf("round %d: rotation succeeded but its rows are gone: refresh=%v access=%v family=%v", i, nextErr, accessErr, familyErr)
+			}
+			continue
+		}
+		wantErr(t, nextErr, storage.ErrNotFound, "successor of a failed rotation")
+		wantErr(t, accessErr, storage.ErrNotFound, "access token of a failed rotation")
+	}
+}
+
+// testPurgeVersusUpsertGrant は、失効済みで Family のない Grant の削除と、同じ Client × subject の
+// 再同意が同時に走っても、再同意で返った Grant が消えていないことを確かめる。
+//
+// Purge が先なら新しい ID の Grant ができ、再同意が先なら既存の行が active に戻って Purge の対象から
+// 外れる。どちらでも、返った ID でトークンを発行できなければならない。
+func testPurgeVersusUpsertGrant(t *testing.T, s authengine.Store) {
+	ctx := context.Background()
+	const rounds = 20
+	for i := 0; i < rounds; i++ {
+		suffix := fmt.Sprintf("-purge-upsert-%d", i)
+		old, err := s.UpsertGrant(ctx, newGrant("g"+suffix, "c"+suffix, "alice", "openid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RevokeGrant(ctx, old.ID, base); err != nil {
+			t.Fatal(err)
+		}
+
+		var (
+			wg                  sync.WaitGroup
+			got                 *grant.Grant
+			upsertErr, purgeErr error
+			start               = make(chan struct{})
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			got, upsertErr = s.UpsertGrant(ctx, newGrant("g2"+suffix, "c"+suffix, "alice", "openid"))
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			purgeErr = s.Purge(ctx, base)
+		}()
+		close(start)
+		wg.Wait()
+
+		if upsertErr != nil || purgeErr != nil {
+			t.Fatalf("round %d: upsert=%v purge=%v", i, upsertErr, purgeErr)
+		}
+		if got.ID != old.ID && got.ID != "g2"+suffix {
+			t.Fatalf("round %d: unexpected grant id %q", i, got.ID)
+		}
+		stored, err := s.GetGrant(ctx, got.ID)
+		if err != nil || !stored.Active() {
+			t.Fatalf("round %d: grant returned by the re-consent must exist and be active: %+v, %v", i, stored, err)
+		}
+		f := newFamily("f"+suffix, got.ID)
+		if err := s.IssueTokens(ctx, f, newAccess("at"+suffix, f.ID, got.ID), newRefresh("rt"+suffix, f.ID)); err != nil {
+			t.Fatalf("round %d: issue under the re-consented grant: %v", i, err)
+		}
 	}
 }
 
