@@ -21,6 +21,7 @@ Go 製ヘッドレス OAuth 2.0 / OIDC 認可サーバー「Protocol Engine」�
 | [ADR-0010 クライアント認証と送信者拘束](adr/0010-client-auth-and-sender-constraint.md) | **草案**。M4a の論点 1〜4: 認証方式は Profile が許す集合から資格情報で決める、`jwks` / `jwks_uri` と `keys` の取得器、`jti` のリプレイ記録は Store Port、DPoP の範囲、FAPI 2.0 の要件を Profile `fapi` として束ねる（PAR 必須・DPoP 必須・Rotation なし） |
 | [ロードマップ](roadmap.md) | M1〜M4 とタスク順序、M1〜M3 の実施結果と計画からの差分、M4a の分解（案） |
 | [組み込みガイド](embedding.md) | エンジンを組み込む人向け。責務の分担、Store の選択、Client 登録、HTTP への公開、鍵、監査ログ、本番前の確認 |
+| [セルフホスト運用ガイド](operations.md) | 運用する人向け。責任分担、出荷前の確認試験、観測とアラート、鍵ローテーション、バックアップと復旧、障害対応 |
 | [Interaction API 仕様](interaction-api.md) | Interaction App 実装者向け。エンドポイント、JSON、エラー、守ってほしいこと |
 | [Conformance Suite](conformance.md) | OpenID Conformance Suite（Basic OP）をローカルで回す構成・手順・想定結果 |
 | [MCP 相互運用](mcp-interop.md) | MCP Inspector（公式 MCP クライアント）で CIMD + PKCE + `resource` のフローを回す構成・手順・結果 |

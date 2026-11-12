@@ -210,7 +210,7 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
 | `authorize.rejected` | 認可要求の拒否。`redirectable` 属性は Client へ戻したかどうか | `redirectable=false` は Client 側の設定ミスであることが多い |
 | `resume.denied` | Resume の拒否（結合 Cookie の不一致など） | 急増は Resume URL 盗用の試み |
 | `http.internal_error` | 内部障害（500 を返した） | **アラート** |
-| `config.insecure_issuer` / `config.insecure_cookies` | 開発用の緩和を有効にして起動した | 本番で出たら設定ミス |
+| `config.insecure_issuer` / `config.insecure_cookies` / `config.cimd_allow_loopback` | 開発用の緩和を有効にして起動した | 本番で出たら設定ミス |
 
 ## 9. 本番に出す前の確認
 
@@ -229,6 +229,7 @@ Interaction App は別のホストに置いてよい。Cookie を照合するの
 
 ## 関連文書
 
+- [セルフホスト運用ガイド](operations.md): 運用する人向け。出荷前の確認試験、監視、鍵ローテーション、復旧
 - [Interaction API 仕様](interaction-api.md): Interaction App を実装する人向け
 - [準拠仕様一覧](specifications.md): 対応している RFC と、まだ対応していないもの
 - [設計ドキュメント](README.md): 判断の理由（ADR）

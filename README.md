@@ -58,6 +58,7 @@ Interaction App（ログイン・同意画面）を実装するには [docs/inte
 - [設計ドキュメント索引](docs/README.md) — ADR と技術スタック案に対する判断の要約
 - [Interaction App との契約](docs/adr/0003-interaction-contract.md) — ヘッドレス構成の核心
 - [組み込みガイド](docs/embedding.md) — エンジンを自分のサービスに組み込む人向け
+- [セルフホスト運用ガイド](docs/operations.md) — 運用する人向け。出荷前の確認試験、監視、鍵ローテーション、復旧
 - [Interaction API 仕様](docs/interaction-api.md) — Interaction App 実装者向け
 - [準拠仕様一覧](docs/specifications.md) — P0〜P3 の段階分け
 - [ロードマップ](docs/roadmap.md) — M1〜M4 とタスク順序、M1〜M3 の実施結果
