@@ -1,6 +1,33 @@
 # examples/standalone
 
-エンジン、Interaction API、デモ Interaction App、開発者コンソールを 1 プロセスで起動する例と、Native / MCP Profile のサンプルクライアント、デモ MCP サーバー（Resource Server）、CIMD 文書の配信サーバー。
+エンジン、Interaction API、デモ Interaction App、開発者コンソールを 1 プロセスで起動する例と、Native / MCP Profile のサンプルクライアント、デモ MCP サーバー（Resource Server）、CIMD 文書の配信サーバー。全体像を先に画面で見たいときは、下の境界ツアーから始める。
+
+## 境界ツアー（全体像を画面で見る）
+
+```bash
+go run ./cmd/tour
+```
+
+`http://localhost:8100` を開く。Client、auth-engine、Interaction App、Resource Server を 1 プロセスで立て、1 回のログインと業務 API の呼び出しで、どのコンポーネントの間を何が通ったかを図とタイムラインで見せる。設定ファイルも DB も要らない（Store は `storage/memory` で、再起動すると消える）。待ち受けるのは loopback だけである。
+
+| コンポーネント | 既定アドレス | 内容 |
+| --- | --- | --- |
+| Client「Notes Web」 | `localhost:8100` | Web Profile の confidential クライアント。トークンはサーバー側のセッションに置く。ツアーの画面もここが出す |
+| auth-engine（公開エンドポイント） | `localhost:8101` | `/authorize`, `/token`, `/revoke`, `/introspect`, `/jwks`, Discovery |
+| Interaction API | `127.0.0.1:8102` | Interaction App だけが呼ぶバックチャネル |
+| Interaction App | `localhost:8103` | ログインと同意の画面（ユーザー名を入れるだけ。毎回表示する） |
+| Resource Server「Notes API」 | `localhost:8104` | `GET /notes`（scope `notes:read`）、`POST /notes`（`notes:write`）。`resourceserver` で Bearer トークンを検証する |
+
+画面でできること:
+
+1. **ログインして連携する** — `/authorize` → Interaction App の同意画面 → `/authorize/resume` → Client の `/callback` → `/token` の順に、ブラウザの遷移とバックチャネルの呼び出し、Store への保存が並ぶ。行を押すと図の線が光り、境界を越えた値（パラメータ、応答、対応する仕様の節）が開く。「順に再生」で 1 つずつ辿れる
+2. **ノートを読む / 書く** — Client が Access Token を付けて Notes API を呼ぶ。この通信は auth-engine を通らない。同意画面で「ノートを書く」を外すと、書き込みが 403 `insufficient_scope` になる
+3. **トークンなしで呼ぶ** — 401 と `WWW-Authenticate` の `resource_metadata`（RFC 9728）が返る
+4. **トークンを更新 / Access Token を失効** — Refresh Token の Rotation と、失効が Resource Server に伝わるタイミングを見る
+
+Notes API の検証方式は `-verify` で切り替える。既定の `jwt` は JWT Access Token（RFC 9068）を JWKS でローカル検証する。Notes API が auth-engine に問い合わせるのは公開鍵を取る最初の 1 回だけで、失効させても exp までは通る。`-verify introspection` にすると Access Token は Opaque になり、呼ばれるたびに Introspection（RFC 7662）するので、失効が次の呼び出しから 401 になる。ポートは `-port-base`（既定 8100）から 5 つ続けて使うので、下のデモサーバー（8080 番台）と同時に動かせる。
+
+タイムラインは、各リスナーの入口のミドルウェアと、Store の一部のメソッドを包んだ記録用の Store で作っている。サーバー間の要求は `Tour-From` ヘッダで送信元を名乗る（図に出すための目印で、プロトコルの一部ではない）。長い秘密値は先頭だけを出す。記録は `GET /trace.json` でも取れる。ID Token の検証はここでは扱わない（`openid` を要求しない）。それは開発者コンソールが見せている。
 
 ## 起動
 
@@ -113,6 +140,8 @@ go run ./cmd/cli-client -client-id-url https://localhost:8444/demo-cli.json -mcp
 - `oauthclient/` — Authorization Code + PKCE、Client Credentials、loopback redirect、RFC 8414 Discovery、`iss` 検証、Refresh、Revocation、Introspection、UserInfo、`resource`（RFC 8707）、Resource Server の発見（RFC 9728 の `WWW-Authenticate` と Protected Resource Metadata）を行う最小クライアント
 - `console/` — 開発者コンソール（Client 管理ダッシュボード）。Client の一覧・登録・編集・削除、シークレットの再発行、利用者の一覧と連携解除（Store と `grant.Service` を Go API で操作する運用者の画面）と、`oauthclient` を使う RP としてのフロー実行・ID Token 検証
 - `adminapi/` — 運用者向けの管理 API（Bearer 認証付きの JSON API）。コンソールと同じ操作を HTTP で提供する例。`ClientSpec` は `-clients` のファイルの書式でもある
+- `tour/` — 境界ツアー。Client（`app.go`）、Interaction App（`interaction.go`）、Resource Server（`notes.go`）と、やり取りの記録（`trace.go`、`store.go`）
+- `cmd/tour/` — 境界ツアーを 5 つのポートで起動する
 - `cmd/server/` — 上記を配線して起動する。`-resources` と CIMD の設定もここ
 - `cmd/cli-client/` — `oauthclient` を使う CLI。`-client-id-url` と `-mcp` で MCP クライアントになる
 - `cmd/mcp-server/` — `resourceserver` を組み込んだデモ MCP サーバー（Resource Server）。`mcp.go` が最小の MCP プロトコル

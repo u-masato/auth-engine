@@ -19,7 +19,7 @@ Go 製のヘッドレスな OAuth 2.0 / OpenID Connect 認可サーバー「Prot
 | `.`（`github.com/u-masato/auth-engine`） | コア。`client` `authorization` `grant` `token` `oidc` `keys` `httpapi` `storage` `resource` `cimd` と、配線の入口 `Engine`。Resource Server 側の `resourceserver` も同じモジュール（`Engine` に依存しない） | go-jose/v4 のみ |
 | `adapters/sqlite` | SQLite Store Adapter（modernc.org/sqlite、goose ライブラリ） | — |
 | `adapters/postgres` | PostgreSQL Store Adapter（pgx/v5、goose）。契約テストは Testcontainers（Docker がなければ Skip、`AUTH_ENGINE_POSTGRES_DSN` で既存 DB も可） | — |
-| `examples/standalone` | デモサーバー、デモ Interaction App（`loginapp`）、サンプルクライアント（`oauthclient`）、開発者コンソール（`console`。Client 登録とフローの手動確認、`127.0.0.1:8083`）、管理 API の例（`adminapi`。Bearer 認証付きの JSON API、`127.0.0.1:8084`、`AUTH_ENGINE_ADMIN_TOKEN` を設定したときだけ起動） | `console` の RP 側 ID Token 検証に go-jose |
+| `examples/standalone` | デモサーバー、デモ Interaction App（`loginapp`）、サンプルクライアント（`oauthclient`）、開発者コンソール（`console`。Client 登録とフローの手動確認、`127.0.0.1:8083`）、管理 API の例（`adminapi`。Bearer 認証付きの JSON API、`127.0.0.1:8084`、`AUTH_ENGINE_ADMIN_TOKEN` を設定したときだけ起動）、境界ツアー（`tour`。Client・Interaction App・Resource Server を通すフローを図とタイムラインで見せる。`cmd/tour`、`127.0.0.1:8100`〜`8104`、Store はメモリ） | `console` の RP 側 ID Token 検証に go-jose |
 | `tests` | SQLite + httptest + loginapp の E2E（RP 側の ID Token 検証に go-jose） | — |
 
 コアのテストから Adapter は import できない（依存が循環する）。Adapter を使うテストは `tests/` に置く。
@@ -34,6 +34,7 @@ go test -race ./authorization/            # 1 パッケージ
 (cd adapters/sqlite && go test -race -count=1 ./...)   # Adapter の契約テスト（ファイル DB）
 (cd adapters/postgres && go test -race -count=1 ./...) # PostgreSQL の契約テスト（Docker が必要）
 (cd examples/standalone && go run ./cmd/server -db ./auth.db)   # デモ起動（別端末で go run ./cmd/cli-client）
+(cd examples/standalone && go run ./cmd/tour)   # 境界ツアー（http://localhost:8100。Interaction App と Resource Server を通すフローを図で見る）
 ```
 
 - staticcheck / govulncheck はローカルのバイナリではなく、Makefile が `go run` で固定バージョン（`STATICCHECK_VERSION` `GOVULNCHECK_VERSION`）を使う。上げるときは Makefile を直す。
